@@ -1,4 +1,4 @@
-package middlewares
+package cors
 
 import (
 	"regexp"
