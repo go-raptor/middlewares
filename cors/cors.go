@@ -126,8 +126,8 @@ func (m *CORSMiddleware) Init(r *core.Resources) {
 	r.Log.Info("CORSMiddleware initialized")
 }
 
-// New handles CORS for a request, setting headers and processing preflight requests.
-func (m *CORSMiddleware) New(c *core.Context, next func(*core.Context) error) error {
+// Handle handles CORS for a request, setting headers and processing preflight requests.
+func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error) error {
 	req := c.Request()
 	res := c.Response()
 
