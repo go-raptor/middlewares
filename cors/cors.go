@@ -144,7 +144,7 @@ func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error)
 		if !preflight {
 			return next(c)
 		}
-		return c.NoContent(204)
+		return c.NoContent()
 	}
 
 	// Validate origin
@@ -189,7 +189,7 @@ func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error)
 			m.Resources.Log.Warn("Unauthorized origin", "origin", origin)
 			return c.JSON(401, map[string]string{"error": "Unauthorized origin"})
 		}
-		return c.NoContent(204)
+		return c.NoContent()
 	}
 
 	// Set CORS headers
@@ -225,7 +225,7 @@ func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error)
 		res.Header().Set(core.HeaderAccessControlMaxAge, m.maxAge)
 	}
 
-	return c.NoContent(204)
+	return c.NoContent()
 }
 
 // contains checks if a slice contains a specific string.
