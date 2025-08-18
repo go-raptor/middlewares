@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -24,11 +25,15 @@ func (m *LoggerMiddleware) Handle(c *raptor.Context, next func(*raptor.Context) 
 
 func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, err error) {
 	durationSinceStart := time.Since(startTime)
-	var duration float64
-	if durationSinceStart < time.Millisecond {
-		duration = float64(durationSinceStart.Microseconds()) / 1000
+	var duration string
+	if durationSinceStart < time.Microsecond {
+		duration = fmt.Sprintf("%dns", durationSinceStart.Nanoseconds())
+	} else if durationSinceStart < time.Millisecond {
+		duration = fmt.Sprintf("%dµs", durationSinceStart.Microseconds())
+	} else if durationSinceStart < time.Second {
+		duration = fmt.Sprintf("%dms", durationSinceStart.Milliseconds())
 	} else {
-		duration = float64(durationSinceStart.Milliseconds())
+		duration = fmt.Sprintf("%.2fs", durationSinceStart.Seconds())
 	}
 
 	attrs := []any{
