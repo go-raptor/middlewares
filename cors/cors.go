@@ -20,8 +20,11 @@ type CORSConfig struct {
 }
 
 var DefaultCORSConfig = CORSConfig{
-	AllowOrigins: []string{"*"},
-	AllowMethods: []string{"GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"},
+	AllowOrigins:     []string{"*"},
+	AllowMethods:     []string{"GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"},
+	AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+	AllowCredentials: true,
+	MaxAge:           3600,
 }
 
 type CORSMiddleware struct {
@@ -49,6 +52,15 @@ func (m *CORSMiddleware) Setup() error {
 	}
 	if len(m.config.AllowMethods) == 0 {
 		m.config.AllowMethods = DefaultCORSConfig.AllowMethods
+	}
+	if len(m.config.AllowHeaders) == 0 {
+		m.config.AllowHeaders = DefaultCORSConfig.AllowHeaders
+	}
+	if !m.config.AllowCredentials {
+		m.config.AllowCredentials = DefaultCORSConfig.AllowCredentials
+	}
+	if m.config.MaxAge == 0 {
+		m.config.MaxAge = DefaultCORSConfig.MaxAge
 	}
 
 	m.allowAll = slices.Contains(m.config.AllowOrigins, "*")
