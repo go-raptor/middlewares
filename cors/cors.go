@@ -10,13 +10,13 @@ import (
 )
 
 type CORSConfig struct {
-	AllowOrigins     []string                              `yaml:"allow_origins"`
-	AllowOriginFunc  func(origin string) (bool, error)     `yaml:"-"`
-	AllowMethods     []string                              `yaml:"allow_methods"`
-	AllowHeaders     []string                              `yaml:"allow_headers"`
-	AllowCredentials bool                                  `yaml:"allow_credentials"`
-	ExposeHeaders    []string                              `yaml:"expose_headers"`
-	MaxAge           int                                   `yaml:"max_age"`
+	AllowOrigins     []string                          `yaml:"allow_origins"`
+	AllowOriginFunc  func(origin string) (bool, error) `yaml:"-"`
+	AllowMethods     []string                          `yaml:"allow_methods"`
+	AllowHeaders     []string                          `yaml:"allow_headers"`
+	AllowCredentials bool                              `yaml:"allow_credentials"`
+	ExposeHeaders    []string                          `yaml:"expose_headers"`
+	MaxAge           int                               `yaml:"max_age"`
 }
 
 var DefaultCORSConfig = CORSConfig{
@@ -26,24 +26,26 @@ var DefaultCORSConfig = CORSConfig{
 
 type CORSMiddleware struct {
 	core.Middleware
-	config          CORSConfig
-	allowAll        bool
-	originPatterns  []*regexp.Regexp
-	allowMethods    string
-	allowHeaders    string
-	exposeHeaders   string
-	maxAge          string
+	config         CORSConfig
+	allowAll       bool
+	originPatterns []*regexp.Regexp
+	allowMethods   string
+	allowHeaders   string
+	exposeHeaders  string
+	maxAge         string
 }
 
 func NewCORSMiddleware(config CORSConfig) *CORSMiddleware {
 	return &CORSMiddleware{config: config}
 }
 
-func (m *CORSMiddleware) Init(r *core.Resources) {
-	m.Middleware.Init(r)
-
+func (m *CORSMiddleware) Setup() error {
 	if len(m.config.AllowOrigins) == 0 {
-		m.config.AllowOrigins = DefaultCORSConfig.AllowOrigins
+		if origin, ok := m.Resources.Config.AppConfig["cors_allow_origins"]; ok {
+			m.config.AllowOrigins = []string{origin}
+		} else {
+			m.config.AllowOrigins = DefaultCORSConfig.AllowOrigins
+		}
 	}
 	if len(m.config.AllowMethods) == 0 {
 		m.config.AllowMethods = DefaultCORSConfig.AllowMethods
@@ -59,7 +61,7 @@ func (m *CORSMiddleware) Init(r *core.Resources) {
 		pattern := "^" + strings.ReplaceAll(strings.ReplaceAll(regexp.QuoteMeta(origin), "\\*", ".*"), "\\?", ".") + "$"
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			r.Log.Warn("Invalid origin pattern, skipping", "origin", origin, "error", err)
+			m.Resources.Log.Warn("Invalid origin pattern, skipping", "origin", origin, "error", err)
 			continue
 		}
 		m.originPatterns = append(m.originPatterns, re)
@@ -73,8 +75,10 @@ func (m *CORSMiddleware) Init(r *core.Resources) {
 	}
 
 	if m.config.AllowCredentials && m.allowAll {
-		r.Log.Warn("CORS: AllowCredentials with wildcard origin reflects the request origin instead of '*'")
+		m.Resources.Log.Warn("CORS: AllowCredentials with wildcard origin reflects the request origin instead of '*'")
 	}
+
+	return nil
 }
 
 func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error) error {
