@@ -12,10 +12,6 @@ import (
 	"github.com/go-raptor/raptor/v4/errs"
 )
 
-func New() *LoggerMiddleware {
-	return &LoggerMiddleware{}
-}
-
 type LoggerMiddleware struct {
 	raptor.Middleware
 }
