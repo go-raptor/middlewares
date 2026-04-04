@@ -12,24 +12,16 @@ import (
 	"github.com/go-raptor/raptor/v4/errs"
 )
 
-func New(handler func(*slog.LevelVar) slog.Handler) *LoggerMiddleware {
-	return &LoggerMiddleware{handler: handler}
+func New() *LoggerMiddleware {
+	return &LoggerMiddleware{}
 }
 
 type LoggerMiddleware struct {
 	raptor.Middleware
-	log     *slog.Logger
-	handler func(*slog.LevelVar) slog.Handler
 }
 
-func (m *LoggerMiddleware) Init(resources *raptor.Resources) {
-	m.Middleware.Init(resources)
-	if m.handler != nil {
-		m.log = slog.New(m.handler(resources.LogLevel))
-	} else {
-		m.log = resources.Log
-	}
-	resources.SetLogHandler(m.log.Handler())
+func (m *LoggerMiddleware) Setup() error {
+	return nil
 }
 
 func (m *LoggerMiddleware) Handle(c *raptor.Context, next func(*raptor.Context) error) error {
@@ -72,7 +64,7 @@ func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, 
 			"status", ctx.Response().Status,
 			"handler", core.ActionDescriptor(ctx.Controller(), ctx.Action()),
 		)
-		m.log.Log(context.Background(), logLevel, message, attrs...)
+		m.Log.Log(context.Background(), logLevel, message, attrs...)
 		return
 	}
 
@@ -106,5 +98,5 @@ func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, 
 	}
 
 	attrs = append(attrs, "status", status)
-	m.log.Log(context.Background(), logLevel, message, attrs...)
+	m.Log.Log(context.Background(), logLevel, message, attrs...)
 }
