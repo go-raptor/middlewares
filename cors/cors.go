@@ -1,6 +1,7 @@
 package cors
 
 import (
+	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
@@ -19,23 +20,27 @@ type CORSConfig struct {
 	MaxAge           int                               `yaml:"max_age"`
 }
 
+// DefaultCORSConfig is safe-by-default: no origins are allowed until the user
+// configures them (via CORSConfig.AllowOrigins or AppConfig["cors_allow_origins"]).
+// AllowCredentials defaults to false and must be opted into explicitly.
+// MaxAge: 0 applies the 3600s default; set MaxAge to -1 to omit the header.
 var DefaultCORSConfig = CORSConfig{
-	AllowOrigins:     []string{"*"},
 	AllowMethods:     []string{"GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"},
 	AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-	AllowCredentials: true,
+	AllowCredentials: false,
 	MaxAge:           3600,
 }
 
 type CORSMiddleware struct {
 	core.Middleware
-	config         CORSConfig
-	allowAll       bool
-	originPatterns []*regexp.Regexp
-	allowMethods   string
-	allowHeaders   string
-	exposeHeaders  string
-	maxAge         string
+	config           CORSConfig
+	allowAll         bool
+	exactOrigins     map[string]struct{}
+	wildcardPatterns []*regexp.Regexp
+	allowMethods     string
+	allowHeaders     string
+	exposeHeaders    string
+	maxAge           string
 }
 
 func NewCORSMiddleware(config CORSConfig) *CORSMiddleware {
@@ -46,8 +51,6 @@ func (m *CORSMiddleware) Setup() error {
 	if len(m.config.AllowOrigins) == 0 {
 		if origin, ok := m.Resources.Config.AppConfig["cors_allow_origins"]; ok {
 			m.config.AllowOrigins = []string{origin}
-		} else {
-			m.config.AllowOrigins = DefaultCORSConfig.AllowOrigins
 		}
 	}
 	if len(m.config.AllowMethods) == 0 {
@@ -56,18 +59,19 @@ func (m *CORSMiddleware) Setup() error {
 	if len(m.config.AllowHeaders) == 0 {
 		m.config.AllowHeaders = DefaultCORSConfig.AllowHeaders
 	}
-	if !m.config.AllowCredentials {
-		m.config.AllowCredentials = DefaultCORSConfig.AllowCredentials
-	}
 	if m.config.MaxAge == 0 {
 		m.config.MaxAge = DefaultCORSConfig.MaxAge
 	}
 
 	m.allowAll = slices.Contains(m.config.AllowOrigins, "*")
 
-	m.originPatterns = make([]*regexp.Regexp, 0, len(m.config.AllowOrigins))
+	m.exactOrigins = make(map[string]struct{}, len(m.config.AllowOrigins))
 	for _, origin := range m.config.AllowOrigins {
 		if origin == "*" {
+			continue
+		}
+		if !strings.ContainsAny(origin, "*?") {
+			m.exactOrigins[origin] = struct{}{}
 			continue
 		}
 		pattern := "^" + strings.ReplaceAll(strings.ReplaceAll(regexp.QuoteMeta(origin), "\\*", ".*"), "\\?", ".") + "$"
@@ -76,7 +80,7 @@ func (m *CORSMiddleware) Setup() error {
 			m.Resources.Log.Warn("Invalid origin pattern, skipping", "origin", origin, "error", err)
 			continue
 		}
-		m.originPatterns = append(m.originPatterns, re)
+		m.wildcardPatterns = append(m.wildcardPatterns, re)
 	}
 
 	m.allowMethods = strings.Join(m.config.AllowMethods, ",")
@@ -99,7 +103,7 @@ func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error)
 	origin := req.Header.Get(core.HeaderOrigin)
 	preflight := req.Method == "OPTIONS"
 
-	res.Header().Add(core.HeaderVary, core.HeaderOrigin)
+	addVary(res.Header(), core.HeaderOrigin)
 
 	if origin == "" {
 		if preflight {
@@ -128,8 +132,8 @@ func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error)
 		return next(c)
 	}
 
-	res.Header().Add(core.HeaderVary, core.HeaderAccessControlRequestMethod)
-	res.Header().Add(core.HeaderVary, core.HeaderAccessControlRequestHeaders)
+	addVary(res.Header(), core.HeaderAccessControlRequestMethod)
+	addVary(res.Header(), core.HeaderAccessControlRequestHeaders)
 	res.Header().Set(core.HeaderAccessControlAllowMethods, m.allowMethods)
 
 	if m.allowHeaders != "" {
@@ -165,11 +169,32 @@ func (m *CORSMiddleware) matchOrigin(origin string) string {
 		return "*"
 	}
 
-	for _, re := range m.originPatterns {
+	if _, ok := m.exactOrigins[origin]; ok {
+		return origin
+	}
+
+	for _, re := range m.wildcardPatterns {
 		if re.MatchString(origin) {
 			return origin
 		}
 	}
 
 	return ""
+}
+
+func addVary(h http.Header, token string) {
+	for _, v := range h.Values(core.HeaderVary) {
+		for len(v) > 0 {
+			var part string
+			if i := strings.IndexByte(v, ','); i >= 0 {
+				part, v = v[:i], v[i+1:]
+			} else {
+				part, v = v, ""
+			}
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return
+			}
+		}
+	}
+	h.Add(core.HeaderVary, token)
 }
