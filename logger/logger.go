@@ -28,71 +28,60 @@ func (m *LoggerMiddleware) Handle(c *raptor.Context, next func(*raptor.Context) 
 }
 
 func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, err error) {
-	durationSinceStart := time.Since(startTime)
-	var duration string
-	if durationSinceStart < time.Microsecond {
-		duration = fmt.Sprintf("%dns", durationSinceStart.Nanoseconds())
-	} else if durationSinceStart < time.Millisecond {
-		duration = fmt.Sprintf("%dµs", durationSinceStart.Microseconds())
-	} else if durationSinceStart < time.Second {
-		duration = fmt.Sprintf("%dms", durationSinceStart.Milliseconds())
-	} else {
-		duration = fmt.Sprintf("%.2fs", durationSinceStart.Seconds())
-	}
+	status := ctx.Response().Status
 
 	attrs := []any{
 		"ip", ctx.RealIP(),
 		"method", ctx.Request().Method,
 		"path", ctx.Request().URL.Path,
-		"duration", duration,
+		"status", status,
+		"duration", formatDuration(time.Since(startTime)),
 	}
 
-	var (
-		logLevel slog.Level
-		message  string
-		status   int
-	)
-
 	if err == nil {
-		logLevel = slog.LevelInfo
-		message = "Request processed"
-		attrs = append(attrs,
-			"status", ctx.Response().Status,
-			"handler", core.ActionDescriptor(ctx.Controller(), ctx.Action()),
-		)
-		m.Log.Log(context.Background(), logLevel, message, attrs...)
+		attrs = append(attrs, "handler", core.ActionDescriptor(ctx.Controller(), ctx.Action()))
+		m.Log.Log(context.Background(), slog.LevelInfo, "Request processed", attrs...)
 		return
 	}
 
-	logLevel = slog.LevelError
-	if raptorErr, ok := err.(*errs.Error); ok {
-		status = raptorErr.Code
-		if status == http.StatusNotFound {
-			message = "Handler not found"
-		} else {
-			message = "Error while processing request"
-		}
-		attrs = append(attrs, "message", raptorErr.Message)
-		errAttrs := raptorErr.AttrsToSlice()
-		for i := 0; i < len(errAttrs); i += 2 {
-			if i+1 < len(errAttrs) {
-				key := errAttrs[i]
-				keyExists := false
-				for j := 0; j < len(attrs); j += 2 {
-					if j+1 < len(attrs) && attrs[j] == key {
-						keyExists = true
-						break
-					}
-				}
-				if !keyExists {
-					attrs = append(attrs, errAttrs[i], errAttrs[i+1])
-				}
-			}
-		}
-	} else {
-		status = http.StatusInternalServerError
+	message := "Error while processing request"
+	if status == http.StatusNotFound {
+		message = "Handler not found"
 	}
+	if raptorErr, ok := err.(*errs.Error); ok {
+		attrs = append(attrs, "message", raptorErr.Message)
+		attrs = appendErrorAttrs(attrs, raptorErr.AttrsToSlice())
+	}
+	m.Log.Log(context.Background(), slog.LevelError, message, attrs...)
+}
 
-	attrs = append(attrs, "status", status)
-	m.Log.Log(context.Background(), logLevel, message, attrs...)
+func formatDuration(d time.Duration) string {
+	switch {
+	case d < time.Microsecond:
+		return fmt.Sprintf("%dns", d.Nanoseconds())
+	case d < time.Millisecond:
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	case d < time.Second:
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	default:
+		return fmt.Sprintf("%.2fs", d.Seconds())
+	}
+}
+
+func appendErrorAttrs(attrs, errAttrs []any) []any {
+	for i := 0; i+1 < len(errAttrs); i += 2 {
+		if !containsKey(attrs, errAttrs[i]) {
+			attrs = append(attrs, errAttrs[i], errAttrs[i+1])
+		}
+	}
+	return attrs
+}
+
+func containsKey(attrs []any, key any) bool {
+	for i := 0; i+1 < len(attrs); i += 2 {
+		if attrs[i] == key {
+			return true
+		}
+	}
+	return false
 }
