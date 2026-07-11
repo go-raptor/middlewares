@@ -49,7 +49,7 @@ func NewCORSMiddleware(config CORSConfig) *CORSMiddleware {
 
 func (m *CORSMiddleware) Setup() error {
 	if len(m.config.AllowOrigins) == 0 {
-		if origin, ok := m.Resources.Config.AppConfig["cors_allow_origins"]; ok {
+		if origin, ok := m.Config.AppConfig["cors_allow_origins"]; ok {
 			m.config.AllowOrigins = []string{origin}
 		}
 	}
@@ -61,6 +61,9 @@ func (m *CORSMiddleware) Setup() error {
 	}
 	if m.config.MaxAge == 0 {
 		m.config.MaxAge = DefaultCORSConfig.MaxAge
+	}
+	if allowCredentials, ok := m.Config.AppConfig["cors_allow_credentials"]; ok {
+		m.config.AllowCredentials = allowCredentials == "true"
 	}
 
 	m.allowAll = slices.Contains(m.config.AllowOrigins, "*")
@@ -77,7 +80,7 @@ func (m *CORSMiddleware) Setup() error {
 		pattern := "^" + strings.ReplaceAll(strings.ReplaceAll(regexp.QuoteMeta(origin), "\\*", ".*"), "\\?", ".") + "$"
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			m.Resources.Log.Warn("Invalid origin pattern, skipping", "origin", origin, "error", err)
+			m.Log.Warn("Invalid origin pattern, skipping", "origin", origin, "error", err)
 			continue
 		}
 		m.wildcardPatterns = append(m.wildcardPatterns, re)
@@ -91,7 +94,7 @@ func (m *CORSMiddleware) Setup() error {
 	}
 
 	if m.config.AllowCredentials && m.allowAll {
-		m.Resources.Log.Warn("CORS: AllowCredentials with wildcard origin reflects the request origin instead of '*'")
+		m.Log.Warn("CORS: AllowCredentials with wildcard origin reflects the request origin instead of '*'")
 	}
 
 	return nil
@@ -153,7 +156,7 @@ func (m *CORSMiddleware) matchOrigin(origin string) string {
 	if m.config.AllowOriginFunc != nil {
 		allowed, err := m.config.AllowOriginFunc(origin)
 		if err != nil {
-			m.Resources.Log.Error("AllowOriginFunc error", "origin", origin, "error", err)
+			m.Log.Error("AllowOriginFunc error", "origin", origin, "error", err)
 			return ""
 		}
 		if allowed {
