@@ -1,10 +1,9 @@
 package logger
 
 import (
-	"context"
-	"fmt"
+	"errors"
 	"log/slog"
-	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-raptor/raptor/v4"
@@ -28,58 +27,59 @@ func (m *LoggerMiddleware) Handle(c *raptor.Context, next func(*raptor.Context) 
 }
 
 func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, err error) {
-	status := ctx.Response().Status
-
-	attrs := []any{
-		"ip", ctx.RealIP(),
-		"method", ctx.Request().Method,
-		"path", ctx.Request().URL.Path,
-		"status", status,
-		"duration", formatDuration(time.Since(startTime)),
+	attrs := []slog.Attr{
+		slog.String("ip", ctx.RealIP()),
+		slog.String("method", ctx.Request().Method),
+		slog.String("path", ctx.Request().URL.Path),
+		slog.Int("status", ctx.Response().Status),
+		slog.String("duration", formatDuration(time.Since(startTime))),
 	}
 
+	// Pass the request's context so a context-aware handler keeps trace or
+	// correlation values instead of losing them to context.Background().
+	reqCtx := ctx.Request().Context()
+
 	if err == nil {
-		attrs = append(attrs, "handler", core.ActionDescriptor(ctx.Controller(), ctx.Action()))
-		m.Log.Log(context.Background(), slog.LevelInfo, "Request processed", attrs...)
+		attrs = append(attrs, slog.String("handler", core.ActionDescriptor(ctx.Controller(), ctx.Action())))
+		m.Log.LogAttrs(reqCtx, slog.LevelInfo, "Request processed", attrs...)
 		return
 	}
 
-	message := "Error while processing request"
-	if status == http.StatusNotFound {
-		message = "Handler not found"
+	// errors.As, not a bare type assertion, so a wrapped *errs.Error still
+	// contributes its message and attrs to the log line.
+	var raptorErr *errs.Error
+	if errors.As(err, &raptorErr) {
+		attrs = append(attrs, slog.String("message", raptorErr.Message))
+		attrs = appendErrorAttrs(attrs, raptorErr.Attrs)
 	}
-	if raptorErr, ok := err.(*errs.Error); ok {
-		attrs = append(attrs, "message", raptorErr.Message)
-		attrs = appendErrorAttrs(attrs, raptorErr.AttrsToSlice())
-	}
-	m.Log.Log(context.Background(), slog.LevelError, message, attrs...)
+	m.Log.LogAttrs(reqCtx, slog.LevelError, "Error while processing request", attrs...)
 }
 
 func formatDuration(d time.Duration) string {
 	switch {
 	case d < time.Microsecond:
-		return fmt.Sprintf("%dns", d.Nanoseconds())
+		return strconv.FormatInt(d.Nanoseconds(), 10) + "ns"
 	case d < time.Millisecond:
-		return fmt.Sprintf("%dµs", d.Microseconds())
+		return strconv.FormatInt(d.Microseconds(), 10) + "µs"
 	case d < time.Second:
-		return fmt.Sprintf("%dms", d.Milliseconds())
+		return strconv.FormatInt(d.Milliseconds(), 10) + "ms"
 	default:
-		return fmt.Sprintf("%.2fs", d.Seconds())
+		return strconv.FormatFloat(d.Seconds(), 'f', 2, 64) + "s"
 	}
 }
 
-func appendErrorAttrs(attrs, errAttrs []any) []any {
-	for i := 0; i+1 < len(errAttrs); i += 2 {
-		if !containsKey(attrs, errAttrs[i]) {
-			attrs = append(attrs, errAttrs[i], errAttrs[i+1])
+func appendErrorAttrs(attrs []slog.Attr, errAttrs map[string]any) []slog.Attr {
+	for key, value := range errAttrs {
+		if !containsKey(attrs, key) {
+			attrs = append(attrs, slog.Any(key, value))
 		}
 	}
 	return attrs
 }
 
-func containsKey(attrs []any, key any) bool {
-	for i := 0; i+1 < len(attrs); i += 2 {
-		if attrs[i] == key {
+func containsKey(attrs []slog.Attr, key string) bool {
+	for _, a := range attrs {
+		if a.Key == key {
 			return true
 		}
 	}
