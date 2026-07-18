@@ -1,6 +1,7 @@
 package cors
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -93,8 +94,14 @@ func (m *CORSMiddleware) Setup() error {
 		m.maxAge = strconv.Itoa(m.config.MaxAge)
 	}
 
-	if m.config.AllowCredentials && m.allowAll {
-		m.Log.Warn("CORS: AllowCredentials with wildcard origin reflects the request origin instead of '*'")
+	// A wildcard origin with credentials is invalid: browsers reject a literal
+	// "*" alongside Access-Control-Allow-Credentials, and the only way to make
+	// it "work" is to reflect the request origin — which lets any site issue
+	// credentialed cross-origin requests and read the responses. Refuse it at
+	// startup and require an explicit origin list. A custom AllowOriginFunc is
+	// exempt: it decides origins itself, so the wildcard list is never consulted.
+	if m.config.AllowCredentials && m.allowAll && m.config.AllowOriginFunc == nil {
+		return fmt.Errorf(`cors: AllowCredentials cannot be combined with a wildcard "*" origin; list explicit origins instead`)
 	}
 
 	return nil
@@ -166,9 +173,9 @@ func (m *CORSMiddleware) matchOrigin(origin string) string {
 	}
 
 	if m.allowAll {
-		if m.config.AllowCredentials {
-			return origin
-		}
+		// Never reflect an arbitrary origin for a wildcard policy. Wildcard +
+		// credentials is refused at Setup, so credentials are off here and the
+		// literal "*" is the correct, safe response.
 		return "*"
 	}
 
