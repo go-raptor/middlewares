@@ -1,20 +1,36 @@
 package limiter
 
 import (
+	"hash/maphash"
+	"net/netip"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
+// numShards splits the visitor map so requests for different clients rarely
+// contend on the same lock. Must be a power of two (see shardFor).
+const numShards = 32
+
+// RateLimiterMemoryStore tracks a token-bucket limiter per client key. It is
+// sharded to reduce lock contention, aggregates IPv6 clients by /64 so an
+// address-rotating client cannot escape its bucket, and caps the number of
+// tracked visitors so a flood of distinct keys cannot exhaust memory.
 type RateLimiterMemoryStore struct {
-	visitors    map[string]*Visitor
-	mutex       sync.Mutex
+	shards      [numShards]shard
+	seed        maphash.Seed
 	rate        rate.Limit
 	burst       int
 	expiresIn   time.Duration
-	lastCleanup time.Time
+	maxPerShard int
 	timeNow     func() time.Time
+}
+
+type shard struct {
+	mutex       sync.Mutex
+	visitors    map[string]*Visitor
+	lastCleanup time.Time
 }
 
 type Visitor struct {
@@ -23,44 +39,99 @@ type Visitor struct {
 }
 
 func newRateLimiterMemoryStore(config RateLimiterConfig) *RateLimiterMemoryStore {
-	store := &RateLimiterMemoryStore{
-		rate:      config.Rate,
-		burst:     config.Burst,
-		expiresIn: config.ExpiresIn,
-		visitors:  make(map[string]*Visitor),
-		timeNow:   time.Now,
+	maxPerShard := config.MaxVisitors / numShards
+	if maxPerShard < 1 {
+		maxPerShard = 1
 	}
-	store.lastCleanup = store.timeNow()
+
+	store := &RateLimiterMemoryStore{
+		seed:        maphash.MakeSeed(),
+		rate:        config.Rate,
+		burst:       config.Burst,
+		expiresIn:   config.ExpiresIn,
+		maxPerShard: maxPerShard,
+		timeNow:     time.Now,
+	}
+	for i := range store.shards {
+		store.shards[i].visitors = make(map[string]*Visitor)
+	}
 	return store
 }
 
 func (store *RateLimiterMemoryStore) Allow(identifier string) (bool, error) {
-	store.mutex.Lock()
-	defer store.mutex.Unlock()
-
-	limiter, exists := store.visitors[identifier]
-	if !exists {
-		limiter = &Visitor{
-			Limiter: rate.NewLimiter(store.rate, store.burst),
-		}
-		store.visitors[identifier] = limiter
-	}
-
+	key := canonicalKey(identifier)
+	sh := store.shardFor(key)
 	now := store.timeNow()
-	limiter.lastSeen = now
 
-	if now.Sub(store.lastCleanup) > store.expiresIn {
-		store.cleanupStaleVisitors()
+	sh.mutex.Lock()
+	defer sh.mutex.Unlock()
+
+	if sh.lastCleanup.IsZero() {
+		sh.lastCleanup = now
+	}
+	if now.Sub(sh.lastCleanup) > store.expiresIn {
+		store.cleanup(sh, now)
 	}
 
-	return limiter.Limiter.AllowN(now, 1), nil
+	visitor, exists := sh.visitors[key]
+	if !exists {
+		if len(sh.visitors) >= store.maxPerShard {
+			store.evictOldest(sh)
+		}
+		visitor = &Visitor{Limiter: rate.NewLimiter(store.rate, store.burst)}
+		sh.visitors[key] = visitor
+	}
+	visitor.lastSeen = now
+
+	return visitor.Limiter.AllowN(now, 1), nil
 }
 
-func (store *RateLimiterMemoryStore) cleanupStaleVisitors() {
-	for id, visitor := range store.visitors {
-		if store.timeNow().Sub(visitor.lastSeen) > store.expiresIn {
-			delete(store.visitors, id)
+func (store *RateLimiterMemoryStore) shardFor(key string) *shard {
+	h := maphash.String(store.seed, key)
+	return &store.shards[h&(numShards-1)]
+}
+
+// cleanup drops visitors idle longer than expiresIn. The caller holds sh.mutex.
+func (store *RateLimiterMemoryStore) cleanup(sh *shard, now time.Time) {
+	for id, visitor := range sh.visitors {
+		if now.Sub(visitor.lastSeen) > store.expiresIn {
+			delete(sh.visitors, id)
 		}
 	}
-	store.lastCleanup = store.timeNow()
+	sh.lastCleanup = now
+}
+
+// evictOldest removes the least-recently-seen visitor to keep the shard within
+// its cap. It only runs when a shard is already full, so its O(n) scan is a
+// backstop under a distinct-key flood, not a hot path. The caller holds sh.mutex.
+func (store *RateLimiterMemoryStore) evictOldest(sh *shard) {
+	var oldestKey string
+	var oldestSeen time.Time
+	first := true
+	for id, visitor := range sh.visitors {
+		if first || visitor.lastSeen.Before(oldestSeen) {
+			oldestKey, oldestSeen, first = id, visitor.lastSeen, false
+		}
+	}
+	if !first {
+		delete(sh.visitors, oldestKey)
+	}
+}
+
+// canonicalKey normalizes a client IP into a bucket key. IPv6 addresses are
+// aggregated to their /64 prefix — the smallest block routinely assigned to a
+// single client — so rotating addresses within it cannot create new buckets.
+// IPv4 addresses (including IPv4-mapped IPv6) key on the full address.
+func canonicalKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is6() {
+		if prefix, err := addr.Prefix(64); err == nil {
+			return prefix.String()
+		}
+	}
+	return addr.String()
 }
