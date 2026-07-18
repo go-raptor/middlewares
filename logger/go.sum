@@ -2,6 +2,8 @@ github.com/go-raptor/connectors v1.1.0 h1:U6Fjhv68q7gIoFEAIKZGd5TtKygmZI8tG5TJt6
 github.com/go-raptor/connectors v1.1.0/go.mod h1:A7T++oNId2F9SB5i9IQcm+3QzruL5s1nFLfRk1eA0SU=
 github.com/go-raptor/raptor/v4 v4.2.5 h1:Z/YIO+4Ff/JUXRaRzdttgcc4U56X8VER1Ni5kgcJ+ec=
 github.com/go-raptor/raptor/v4 v4.2.5/go.mod h1:JTfA6TgI8NANXCxhf4UUb+De4Vpzqr9i2/3AwAq1Ev4=
+github.com/go-raptor/raptor/v4 v4.3.0 h1:GavA5UblgHPd0Kzk/24BfiW1dCfmVRQv6lKxINS12c4=
+github.com/go-raptor/raptor/v4 v4.3.0/go.mod h1:JTfA6TgI8NANXCxhf4UUb+De4Vpzqr9i2/3AwAq1Ev4=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=

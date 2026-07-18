@@ -10,6 +10,8 @@ github.com/go-raptor/raptor/v4 v4.1.18 h1:5XS65s2adP2Y0F7evTAxBfGTH968r2A2znvltb
 github.com/go-raptor/raptor/v4 v4.1.18/go.mod h1:jpe+upatg2qcfMtHZAydHMMZIx0Ca8rDAwntF8Zuyb4=
 github.com/go-raptor/raptor/v4 v4.2.5 h1:Z/YIO+4Ff/JUXRaRzdttgcc4U56X8VER1Ni5kgcJ+ec=
 github.com/go-raptor/raptor/v4 v4.2.5/go.mod h1:JTfA6TgI8NANXCxhf4UUb+De4Vpzqr9i2/3AwAq1Ev4=
+github.com/go-raptor/raptor/v4 v4.3.0 h1:GavA5UblgHPd0Kzk/24BfiW1dCfmVRQv6lKxINS12c4=
+github.com/go-raptor/raptor/v4 v4.3.0/go.mod h1:JTfA6TgI8NANXCxhf4UUb+De4Vpzqr9i2/3AwAq1Ev4=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
