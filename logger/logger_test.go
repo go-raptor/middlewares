@@ -1,12 +1,14 @@
 package logger
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-raptor/raptor/v4/config"
@@ -44,12 +46,16 @@ func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
 
 func run(t *testing.T, req *http.Request, next func(*core.Context) error) captured {
 	t.Helper()
+	return runWith(t, &LoggerMiddleware{}, req, next)
+}
+
+func runWith(t *testing.T, m *LoggerMiddleware, req *http.Request, next func(*core.Context) error) captured {
+	t.Helper()
 	cap := &capturingHandler{}
 	r := core.NewResources()
 	r.SetConfig(config.NewConfigDefaults())
 	r.SetLogHandler(cap)
 
-	m := &LoggerMiddleware{}
 	m.Init(r)
 
 	ctx := core.NewContext(core.NewCore(r), req, httptest.NewRecorder())
@@ -61,7 +67,17 @@ func run(t *testing.T, req *http.Request, next func(*core.Context) error) captur
 	return cap.records[0]
 }
 
-func TestWrappedErrorAttrsAreLogged(t *testing.T) {
+// line renders a captured record the way a text log prints it.
+func line(t *testing.T, c captured) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := slog.NewTextHandler(&buf, nil).Handle(c.ctx, c.rec); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func TestWrappedErrorAttrKeysAreLogged(t *testing.T) {
 	wrapped := fmt.Errorf("service failed: %w", errs.NewErrorBadRequest("bad thing", "field", "name"))
 	rec := run(t, httptest.NewRequest(http.MethodGet, "/things", nil), func(c *core.Context) error {
 		c.Status(http.StatusBadRequest)
@@ -71,8 +87,47 @@ func TestWrappedErrorAttrsAreLogged(t *testing.T) {
 	if msg, ok := rec.attr("message"); !ok || msg.String() != "bad thing" {
 		t.Fatalf("a wrapped errs.Error's message must be logged (requires errors.As, not a bare type assertion); got %q ok=%v", msg.String(), ok)
 	}
+	if keys, ok := rec.attr("attr_keys"); !ok || fmt.Sprint(keys.Any()) != "[field]" {
+		t.Fatalf("a wrapped errs.Error's attr keys must be logged; got %v ok=%v", keys, ok)
+	}
+	if _, ok := rec.attr("field"); ok {
+		t.Fatal("attr values must not be logged by default")
+	}
+}
+
+func TestErrorAttrValuesNotLoggedByDefault(t *testing.T) {
+	rec := run(t, httptest.NewRequest(http.MethodPost, "/login", nil), func(c *core.Context) error {
+		c.Status(http.StatusUnprocessableEntity)
+		return errs.NewErrorUnprocessableEntity("x", "password", "hunter2")
+	})
+	out := line(t, rec)
+	if strings.Contains(out, "hunter2") {
+		t.Fatalf("an attr value reached the log: %s", out)
+	}
+	if !strings.Contains(out, "attr_keys=[password]") {
+		t.Fatalf("attr keys should be logged: %s", out)
+	}
+}
+
+func TestErrorAttrsConfigurable(t *testing.T) {
+	req := func() *http.Request { return httptest.NewRequest(http.MethodPost, "/users", nil) }
+
+	rec := runWith(t, NewLoggerMiddleware(LoggerConfig{ErrorAttrs: ErrorAttrValues}), req(), func(c *core.Context) error {
+		return errs.NewErrorBadRequest("bad", "field", "name")
+	})
 	if f, ok := rec.attr("field"); !ok || f.String() != "name" {
-		t.Fatalf("a wrapped errs.Error's attrs must be logged; got %q ok=%v", f.String(), ok)
+		t.Fatalf("ErrorAttrValues must log values verbatim; got %v ok=%v", f, ok)
+	}
+
+	onlyConstraint := func(a map[string]any) []slog.Attr { return []slog.Attr{slog.Any("constraint", a["constraint"])} }
+	rec = runWith(t, NewLoggerMiddleware(LoggerConfig{ErrorAttrs: onlyConstraint}), req(), func(c *core.Context) error {
+		return errs.NewErrorConflict("duplicate", "constraint", "users_email_key", "email", "a@b.example")
+	})
+	if v, ok := rec.attr("constraint"); !ok || v.String() != "users_email_key" {
+		t.Fatalf("custom ErrorAttrs must be used; got %v ok=%v", v, ok)
+	}
+	if out := line(t, rec); strings.Contains(out, "a@b.example") {
+		t.Fatalf("custom ErrorAttrs leaked an unselected value: %s", out)
 	}
 }
 
