@@ -19,6 +19,10 @@ type RateLimiterConfig struct {
 	MaxVisitors int `yaml:"max_visitors"`
 }
 
+// DefaultRateLimiterConfig allows 20 requests per second per client IP, with a
+// burst of 20. That suits general API throttling but does nothing against
+// password guessing; scope a much stricter limiter to the login action (see
+// the README).
 var DefaultRateLimiterConfig = RateLimiterConfig{
 	Rate:        20,
 	Burst:       0,
