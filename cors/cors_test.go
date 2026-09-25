@@ -187,3 +187,19 @@ func TestVaryOriginAlwaysSet(t *testing.T) {
 		t.Fatalf("Vary: Origin must be set so caches don't serve a CORS response to the wrong origin; got %q", got)
 	}
 }
+
+func TestAppConfigOriginsAreCommaSeparated(t *testing.T) {
+	r := testResources()
+	r.Config.AppConfig["cors_allow_origins"] = "https://a.example, https://b.example,, "
+	m := NewCORSMiddleware(CORSConfig{})
+	m.Init(r)
+	if err := m.Setup(); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for _, origin := range []string{"https://a.example", "https://b.example"} {
+		rec, _ := handle(t, m, http.MethodGet, origin, nil)
+		if got := rec.Header().Get(core.HeaderAccessControlAllowOrigin); got != origin {
+			t.Errorf("origin %s: Access-Control-Allow-Origin = %q", origin, got)
+		}
+	}
+}

@@ -22,7 +22,8 @@ type CORSConfig struct {
 }
 
 // DefaultCORSConfig is safe-by-default: no origins are allowed until the user
-// configures them (via CORSConfig.AllowOrigins or AppConfig["cors_allow_origins"]).
+// configures them (via CORSConfig.AllowOrigins or AppConfig["cors_allow_origins"],
+// a comma-separated list).
 // AllowCredentials defaults to false and must be opted into explicitly.
 // MaxAge: 0 applies the 3600s default; set MaxAge to -1 to omit the header.
 var DefaultCORSConfig = CORSConfig{
@@ -50,9 +51,7 @@ func NewCORSMiddleware(config CORSConfig) *CORSMiddleware {
 
 func (m *CORSMiddleware) Setup() error {
 	if len(m.config.AllowOrigins) == 0 {
-		if origin, ok := m.Config.AppConfig["cors_allow_origins"]; ok {
-			m.config.AllowOrigins = []string{origin}
-		}
+		m.config.AllowOrigins = splitList(m.Config.AppConfig["cors_allow_origins"])
 	}
 	if len(m.config.AllowMethods) == 0 {
 		m.config.AllowMethods = DefaultCORSConfig.AllowMethods
@@ -190,6 +189,18 @@ func (m *CORSMiddleware) matchOrigin(origin string) string {
 	}
 
 	return ""
+}
+
+// splitList reads a comma-separated config value, trimming spaces and
+// dropping empty entries.
+func splitList(s string) []string {
+	var out []string
+	for part := range strings.SplitSeq(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func addVary(h http.Header, token string) {
