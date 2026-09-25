@@ -6,7 +6,7 @@ Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
 ### Added
 
-- New module wrapping `http.CrossOriginProtection`: rejects cross-origin unsafe requests app-wide with a JSON 403. Trusted origins come from `CSRFConfig.TrustedOrigins` or the comma-separated `csrf_trusted_origins` app config; `BypassPatterns` exempt self-authenticating callbacks.
+- New module wrapping `http.CrossOriginProtection`: rejects cross-origin unsafe requests app-wide with a JSON 403. Trusted origins come from `CSRFConfig.TrustedOrigins` or the comma-separated `csrf_trusted_origins` app config; `BypassPatterns` exempt self-authenticating callbacks. Wildcard origins fail `Setup` (they would never match). Each rejection is logged with the request's Origin, Sec-Fetch-Site and Host.
 
 ## logger — Unreleased (v1.1.0)
 

@@ -1,11 +1,13 @@
 package csrf
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-raptor/raptor/v4/config"
@@ -124,5 +126,36 @@ func TestBypassPatternPasses(t *testing.T) {
 	}
 	if _, called := serve(m, http.MethodPost, "/things", crossSite); called {
 		t.Error("the bypass must not cover other paths")
+	}
+}
+
+func TestWildcardTrustedOriginFailsSetup(t *testing.T) {
+	for name, m := range map[string]*CSRFMiddleware{
+		"config":     NewCSRFMiddleware(CSRFConfig{TrustedOrigins: []string{"https://*.example.com"}}),
+		"app config": NewCSRFMiddleware(CSRFConfig{}),
+	} {
+		m.Init(testResources(map[string]string{"csrf_trusted_origins": "https://*.example.com"}))
+		if err := m.Setup(); err == nil {
+			t.Errorf("%s: a wildcard origin never matches, so Setup must reject it", name)
+		}
+	}
+}
+
+func TestRejectionLogsDiagnostics(t *testing.T) {
+	var buf bytes.Buffer
+	r := testResources(nil)
+	r.SetLogHandler(slog.NewTextHandler(&buf, nil))
+	m := NewCSRFMiddleware(CSRFConfig{})
+	m.Init(r)
+	if err := m.Setup(); err != nil {
+		t.Fatal(err)
+	}
+
+	serve(m, http.MethodPost, "/things", crossSite)
+	out := buf.String()
+	for _, want := range []string{"origin=https://evil.example", "sec_fetch_site=cross-site", "host=api.example", "reason="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the rejection log must carry %q to diagnose proxy setups: %s", want, out)
+		}
 	}
 }

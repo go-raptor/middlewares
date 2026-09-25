@@ -15,7 +15,8 @@ import (
 type CSRFConfig struct {
 	// TrustedOrigins may make cross-origin writes, e.g.
 	// "https://admin.example.com". When empty, AppConfig["csrf_trusted_origins"]
-	// (comma-separated) is used instead.
+	// (comma-separated) is used instead. Origins are matched exactly; unlike
+	// cors_allow_origins, wildcards are not supported and fail Setup.
 	TrustedOrigins []string `yaml:"trusted_origins"`
 
 	// BypassPatterns are ServeMux patterns exempt from the check, e.g.
@@ -43,6 +44,9 @@ func (m *CSRFMiddleware) Setup() error {
 		origins = splitList(m.Config.AppConfig["csrf_trusted_origins"])
 	}
 	for _, origin := range origins {
+		if strings.Contains(origin, "*") {
+			return fmt.Errorf("csrf: trusted origin %q: wildcards are not supported, list each origin", origin)
+		}
 		if err := m.protection.AddTrustedOrigin(origin); err != nil {
 			return fmt.Errorf("csrf: %w", err)
 		}
@@ -54,9 +58,14 @@ func (m *CSRFMiddleware) Setup() error {
 }
 
 func (m *CSRFMiddleware) Handle(ctx *raptor.Context, next func(*raptor.Context) error) error {
-	if err := m.protection.Check(ctx.Request()); err != nil {
+	req := ctx.Request()
+	if err := m.protection.Check(req); err != nil {
+		// Origin, Sec-Fetch-Site and Host are what tell a real cross-site
+		// request apart from a proxy that rewrites Host.
 		m.Log.Warn("Rejected cross-origin request",
-			"ip", ctx.RealIP(), "method", ctx.Request().Method, "path", ctx.Request().URL.Path)
+			"ip", ctx.RealIP(), "method", req.Method, "path", req.URL.Path,
+			"origin", req.Header.Get("Origin"), "sec_fetch_site", req.Header.Get("Sec-Fetch-Site"),
+			"host", req.Host, "reason", err)
 		return errs.NewErrorForbidden("Cross-origin request rejected")
 	}
 	return next(ctx)

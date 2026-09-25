@@ -52,14 +52,14 @@ app:
   cors_allow_credentials: "true"
 ```
 
-`CORSConfig.AllowOrigins` takes precedence over the config value. Patterns such as `https://*.example.com` are supported. `"*"` combined with credentials is refused at startup, because it would let any site make credentialed requests and read the responses.
+`CORSConfig.AllowOrigins` takes precedence over the config value. If a listed frontend also sends writes and you use [csrf](#csrf), list it in `csrf_trusted_origins` too, or its POST, PUT and DELETE requests get a 403. Patterns such as `https://*.example.com` are supported. `"*"` combined with credentials is refused at startup, because it would let any site make credentialed requests and read the responses.
 
 ## csrf
 
 A cookie-authenticated API needs CSRF protection. Three defenses combine:
 
 1. **`SameSite=Lax` cookies.** The browser doesn't attach the cookie to cross-site POST, PUT or DELETE requests. It does attach it to top-level cross-site GET navigations, so GET must never change state.
-2. **JSON-only request bodies.** A forged HTML form can't send `application/json`. Multipart uploads give this defense up.
+2. **JSON-only request bodies.** A forged HTML form can't send `application/json`. This only holds if the app rejects writes whose `Content-Type` isn't JSON: Raptor's `ctx.Bind` doesn't check it, so a form posting `text/plain` with a JSON-shaped body would bind. Multipart uploads give this defense up.
 3. **This middleware.** It wraps Go's `http.CrossOriginProtection`, which rejects cross-origin unsafe requests based on `Sec-Fetch-Site`, falling back to comparing `Origin` with `Host`. It covers every endpoint, uploads included, and needs no tokens.
 
 Register it globally with `raptor.Use(&csrf.CSRFMiddleware{})`. GET, HEAD and OPTIONS always pass. A rejected request gets `403 {"code":403,"message":"Cross-origin request rejected"}`.
@@ -71,11 +71,13 @@ app:
   csrf_trusted_origins: "https://admin.example.com"
 ```
 
+Origins are matched exactly: unlike `cors_allow_origins`, wildcards such as `https://*.example.com` aren't supported and fail at startup. A frontend on another origin usually needs listing twice, in `cors_allow_origins` so the browser lets it read responses and in `csrf_trusted_origins` so its writes aren't rejected.
+
 In code, `csrf.NewCSRFMiddleware(csrf.CSRFConfig{TrustedOrigins: ..., BypassPatterns: ...})` does the same. `BypassPatterns` are ServeMux patterns such as `"POST /api/v1/webhooks/{provider}"`, for server-to-server callbacks that authenticate themselves. An invalid pattern panics at startup.
 
 Deployment details:
 
-- **Production.** Serve HTTPS, or preserve the `Host` header at the reverse proxy (`proxy_set_header Host $host;`). Browsers send `Sec-Fetch-Site` only to HTTPS origins and localhost. Without it the check compares `Origin` with `Host`, so a proxy that rewrites `Host` rejects every write.
+- **Production.** Serve HTTPS, or preserve the `Host` header at the reverse proxy (`proxy_set_header Host $host;`). Browsers send `Sec-Fetch-Site` only to HTTPS origins and localhost. Without it the check compares `Origin` with `Host`, so a proxy that rewrites `Host` rejects every write. Each rejection is logged at warn level with the request's `origin`, `sec_fetch_site` and `host`, which shows which case you're in.
 - **Vite dev proxy.** Proxy the API with the object form and without `changeOrigin`, so `Host` is preserved:
 
   ```ts
