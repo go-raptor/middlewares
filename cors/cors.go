@@ -62,8 +62,10 @@ func (m *CORSMiddleware) Setup() error {
 	if m.config.MaxAge == 0 {
 		m.config.MaxAge = DefaultCORSConfig.MaxAge
 	}
-	if allowCredentials, ok := m.Config.AppConfig["cors_allow_credentials"]; ok {
-		m.config.AllowCredentials = allowCredentials == "true"
+	// Like the origins, code wins: config only fills what code left unset, so it can turn
+	// credentials on but never off.
+	if !m.config.AllowCredentials {
+		m.config.AllowCredentials = m.Config.AppConfig["cors_allow_credentials"] == "true"
 	}
 
 	m.allowAll = slices.Contains(m.config.AllowOrigins, "*")

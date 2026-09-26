@@ -15,7 +15,7 @@ Middlewares for the [Raptor](https://github.com/go-raptor/raptor) web framework.
 func Middlewares() raptor.Middlewares {
 	return raptor.Middlewares{
 		raptor.Use(&logger.LoggerMiddleware{}),
-		raptor.Use(cors.NewCORSMiddleware(cors.CORSConfig{})),
+		raptor.Use(&cors.CORSMiddleware{}),
 		raptor.Use(&csrf.CSRFMiddleware{}),
 		raptor.Use(limiter.NewRateLimiterMiddleware(limiter.RateLimiterConfig{})),
 		raptor.UseOnly(limiter.NewRateLimiterMiddleware(limiter.RateLimiterConfig{
@@ -52,7 +52,7 @@ app:
   cors_allow_credentials: "true"
 ```
 
-`CORSConfig.AllowOrigins` takes precedence over the config value. If a listed frontend also sends writes and you use [csrf](#csrf), list it in `csrf_trusted_origins` too, or its POST, PUT and DELETE requests get a 403. Patterns such as `https://*.example.com` are supported. `"*"` combined with credentials is refused at startup, because it would let any site make credentialed requests and read the responses.
+A value set in `CORSConfig` takes precedence over the config value: config only fills what code leaves unset, so `cors_allow_credentials` can turn credentials on but never turn off `AllowCredentials: true`. It must be exactly `"true"`. If a listed frontend also sends writes and you use [csrf](#csrf), list it in `csrf_trusted_origins` too, or its POST, PUT and DELETE requests get a 403. Patterns such as `https://*.example.com` are supported. `"*"` combined with credentials is refused at startup, because it would let any site make credentialed requests and read the responses.
 
 ## csrf
 

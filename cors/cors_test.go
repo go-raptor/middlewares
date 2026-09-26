@@ -3,6 +3,7 @@ package cors
 import (
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -201,5 +202,35 @@ func TestAppConfigOriginsAreCommaSeparated(t *testing.T) {
 		if got := rec.Header().Get(core.HeaderAccessControlAllowOrigin); got != origin {
 			t.Errorf("origin %s: Access-Control-Allow-Origin = %q", origin, got)
 		}
+	}
+}
+
+// credentialsFor reports the Access-Control-Allow-Credentials an allowed origin gets from a
+// middleware configured in code by cfg and in app config by app.
+func credentialsFor(t *testing.T, cfg CORSConfig, app map[string]string) string {
+	t.Helper()
+	r := testResources()
+	maps.Copy(r.Config.AppConfig, app)
+	cfg.AllowOrigins = []string{"http://localhost:5173"}
+	m := NewCORSMiddleware(cfg)
+	m.Init(r)
+	if err := m.Setup(); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	rec, _ := handle(t, m, http.MethodGet, "http://localhost:5173", nil)
+	return rec.Header().Get(core.HeaderAccessControlAllowCredentials)
+}
+
+// A value set in code wins, as AllowOrigins does over cors_allow_origins: app config only fills
+// what code leaves unset, so it can turn credentials on but never off.
+func TestCodeCredentialsWinOverAppConfig(t *testing.T) {
+	if got := credentialsFor(t, CORSConfig{AllowCredentials: true}, map[string]string{"cors_allow_credentials": "false"}); got != "true" {
+		t.Fatalf("cors_allow_credentials \"false\" overrode AllowCredentials set in code: got %q", got)
+	}
+}
+
+func TestAppConfigEnablesCredentials(t *testing.T) {
+	if got := credentialsFor(t, CORSConfig{}, map[string]string{"cors_allow_credentials": "true"}); got != "true" {
+		t.Fatalf("cors_allow_credentials \"true\" did not enable credentials: got %q", got)
 	}
 }

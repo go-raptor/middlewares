@@ -2,6 +2,12 @@
 
 Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
+## cors — v1.1.0 (2026-09-26)
+
+### Changed
+
+- **Behavior:** `cors_allow_credentials` in app config no longer overrides `AllowCredentials: true` set in code. Like `cors_allow_origins`, config only fills what code leaves unset, so it can turn credentials on but not off. This matches `csrf` and `controllers/spa`.
+
 ## csrf — v1.0.0 (2026-09-25)
 
 ### Added
