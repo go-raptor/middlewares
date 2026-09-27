@@ -20,6 +20,12 @@ type LoggerConfig struct {
 	// submitted values, passwords included), so nil means ErrorAttrKeys:
 	// only the keys are logged. ErrorAttrValues restores verbatim logging.
 	ErrorAttrs func(map[string]any) []slog.Attr `yaml:"-"`
+
+	// Level picks a request line's level from its response status. nil means
+	// StatusLevel: error for 5xx, warn for 4xx, info otherwise. Delegate to
+	// StatusLevel for the statuses you don't override. It runs on every
+	// request, so keep it cheap.
+	Level func(status int) slog.Level `yaml:"-"`
 }
 
 type LoggerMiddleware struct {
@@ -43,21 +49,32 @@ func (m *LoggerMiddleware) Handle(c *raptor.Context, next func(*raptor.Context) 
 }
 
 func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, err error) {
-	attrs := []slog.Attr{
-		slog.String("ip", ctx.RealIP()),
-		slog.String("method", ctx.Request().Method),
-		slog.String("path", ctx.Request().URL.Path),
-		slog.Int("status", ctx.Response().Status),
-		slog.String("duration", formatDuration(time.Since(startTime))),
-	}
+	// Raptor renders a returned error before next() returns, so this is the
+	// status the client gets, a plain error's 500 included.
+	status := ctx.Response().Status
+	level := m.level(status)
 
 	// Pass the request's context so a context-aware handler keeps trace or
 	// correlation values instead of losing them to context.Background().
 	reqCtx := ctx.Request().Context()
 
+	// LogAttrs would drop a disabled line too, but only after its attrs
+	// were built.
+	if !m.Log.Enabled(reqCtx, level) {
+		return
+	}
+
+	attrs := []slog.Attr{
+		slog.String("ip", ctx.RealIP()),
+		slog.String("method", ctx.Request().Method),
+		slog.String("path", ctx.Request().URL.Path),
+		slog.Int("status", status),
+		slog.String("duration", formatDuration(time.Since(startTime))),
+	}
+
 	if err == nil {
 		attrs = append(attrs, slog.String("handler", core.ActionDescriptor(ctx.Controller(), ctx.Action())))
-		m.Log.LogAttrs(reqCtx, slog.LevelInfo, "Request processed", attrs...)
+		m.Log.LogAttrs(reqCtx, level, "Request processed", attrs...)
 		return
 	}
 
@@ -68,7 +85,7 @@ func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, 
 		attrs = append(attrs, slog.String("message", raptorErr.Message))
 		attrs = appendErrorAttrs(attrs, m.errorAttrs(raptorErr.Attrs))
 	}
-	m.Log.LogAttrs(reqCtx, slog.LevelError, "Error while processing request", attrs...)
+	m.Log.LogAttrs(reqCtx, level, "Error while processing request", attrs...)
 }
 
 func formatDuration(d time.Duration) string {
@@ -81,6 +98,20 @@ func formatDuration(d time.Duration) string {
 		return strconv.FormatInt(d.Milliseconds(), 10) + "ms"
 	default:
 		return strconv.FormatFloat(d.Seconds(), 'f', 2, 64) + "s"
+	}
+}
+
+// StatusLevel logs a server failure (5xx) at error, a client error (4xx) at
+// warn and anything else at info, so rejected requests don't bury real
+// failures.
+func StatusLevel(status int) slog.Level {
+	switch {
+	case status >= 500:
+		return slog.LevelError
+	case status >= 400:
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
 	}
 }
 
@@ -98,6 +129,13 @@ func ErrorAttrValues(attrs map[string]any) []slog.Attr {
 		out = append(out, slog.Any(key, attrs[key]))
 	}
 	return out
+}
+
+func (m *LoggerMiddleware) level(status int) slog.Level {
+	if m.config.Level != nil {
+		return m.config.Level(status)
+	}
+	return StatusLevel(status)
 }
 
 func (m *LoggerMiddleware) errorAttrs(attrs map[string]any) []slog.Attr {

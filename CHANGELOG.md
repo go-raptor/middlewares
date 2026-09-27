@@ -2,6 +2,20 @@
 
 Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
+## logger — v1.2.0 (2026-09-27)
+
+### Changed
+
+- **Behavior:** a request line's level now follows the response status instead of whether the handler returned an error: 5xx at error, 4xx at warn, anything else at info. Returned client errors (a 400, a CSRF 403, a 404, a 429 from the rate limiter) drop from error to warn, which leaves error level to server failures, 502 and 504 from failed upstream calls included. A 4xx or 5xx written without returning an error, such as `c.NotFound()`, rises from info. Messages and attributes are unchanged, so queries on the message keep working, but an alert on error level now fires only for 5xx.
+
+### Added
+
+- `LoggerConfig.Level func(status int) slog.Level` picks the level from the status. nil means `StatusLevel`, the new default.
+
+### Performance
+
+- A request line below the configured log level returns before building its attributes: about 45 ns and no allocations, down from about 280 ns and 3 allocations.
+
 ## cors — v1.1.0 (2026-09-26)
 
 ### Changed

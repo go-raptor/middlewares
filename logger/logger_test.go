@@ -3,6 +3,7 @@ package logger
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-raptor/raptor/v4/config"
 	"github.com/go-raptor/raptor/v4/core"
@@ -65,6 +67,38 @@ func runWith(t *testing.T, m *LoggerMiddleware, req *http.Request, next func(*co
 		t.Fatalf("expected exactly 1 log record, got %d", len(cap.records))
 	}
 	return cap.records[0]
+}
+
+// serveChain serves action behind m through Raptor's own compiled chain, so
+// the status the logger sees is the one Raptor renders, not one a test set.
+func serveChain(t *testing.T, m *LoggerMiddleware, action core.HandlerFunc) (captured, *httptest.ResponseRecorder) {
+	t.Helper()
+	cap := &capturingHandler{}
+	r := core.NewResources()
+	r.SetConfig(config.NewConfigDefaults())
+	r.SetLogHandler(cap)
+
+	c := core.NewCore(r)
+	c.RegisterHandler("TestController", "Show", action)
+	if err := c.RegisterMiddlewares(&core.Components{Middlewares: core.Middlewares{core.Use(m)}}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/things/1", nil)
+	c.Serve(rec, req, c.Handlers["TestController"]["Show"], "TestController", "Show", "/things/{id}", nil)
+
+	// A plain error also gets Raptor's own "Unhandled error in handler" line.
+	var lines []captured
+	for _, rc := range cap.records {
+		if rc.rec.Message == "Request processed" || rc.rec.Message == "Error while processing request" {
+			lines = append(lines, rc)
+		}
+	}
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly 1 request line, got %d", len(lines))
+	}
+	return lines[0], rec
 }
 
 // line renders a captured record the way a text log prints it.
@@ -179,6 +213,120 @@ func TestSuccessLogsHandlerAndBasics(t *testing.T) {
 	}
 }
 
+func TestStatusLevel(t *testing.T) {
+	tests := []struct {
+		status int
+		want   slog.Level
+	}{
+		{0, slog.LevelInfo},
+		{http.StatusSwitchingProtocols, slog.LevelInfo},
+		{http.StatusOK, slog.LevelInfo},
+		{http.StatusNoContent, slog.LevelInfo},
+		{http.StatusNotModified, slog.LevelInfo},
+		{399, slog.LevelInfo},
+		{http.StatusBadRequest, slog.LevelWarn},
+		{http.StatusForbidden, slog.LevelWarn},
+		{http.StatusNotFound, slog.LevelWarn},
+		{http.StatusTooManyRequests, slog.LevelWarn},
+		{499, slog.LevelWarn},
+		{http.StatusInternalServerError, slog.LevelError},
+		{http.StatusBadGateway, slog.LevelError},
+		{http.StatusGatewayTimeout, slog.LevelError},
+		{599, slog.LevelError},
+	}
+	for _, tt := range tests {
+		if got := StatusLevel(tt.status); got != tt.want {
+			t.Errorf("StatusLevel(%d) = %v, want %v", tt.status, got, tt.want)
+		}
+	}
+}
+
+func TestRequestLevelFollowsStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		action     core.HandlerFunc
+		wantStatus int
+		wantLevel  slog.Level
+		wantMsg    string
+	}{
+		{"success", func(c *core.Context) error {
+			return c.JSON(http.StatusOK, map[string]string{"id": "1"})
+		}, http.StatusOK, slog.LevelInfo, "Request processed"},
+		{"returned 404", func(c *core.Context) error {
+			return errs.NewErrorNotFound("course not found")
+		}, http.StatusNotFound, slog.LevelWarn, "Error while processing request"},
+		{"returned 429", func(c *core.Context) error {
+			return errs.NewErrorTooManyRequests("Rate limit exceeded")
+		}, http.StatusTooManyRequests, slog.LevelWarn, "Error while processing request"},
+		{"returned 502", func(c *core.Context) error {
+			return errs.NewErrorBadGateway("upstream failed")
+		}, http.StatusBadGateway, slog.LevelError, "Error while processing request"},
+		{"plain error rendered as 500", func(c *core.Context) error {
+			return errors.New("boom")
+		}, http.StatusInternalServerError, slog.LevelError, "Error while processing request"},
+		{"404 written, nil returned", func(c *core.Context) error {
+			return c.NotFound()
+		}, http.StatusNotFound, slog.LevelWarn, "Request processed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, resp := serveChain(t, &LoggerMiddleware{}, tt.action)
+
+			if resp.Code != tt.wantStatus {
+				t.Fatalf("response status: got %d, want %d", resp.Code, tt.wantStatus)
+			}
+			if v, ok := rec.attr("status"); !ok || v.Int64() != int64(tt.wantStatus) {
+				t.Errorf("logged status: got %v, want %d (the status the client received)", v, tt.wantStatus)
+			}
+			if rec.rec.Level != tt.wantLevel {
+				t.Errorf("level: got %v, want %v", rec.rec.Level, tt.wantLevel)
+			}
+			if rec.rec.Message != tt.wantMsg {
+				t.Errorf("message: got %q, want %q", rec.rec.Message, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestLevelConfigurable(t *testing.T) {
+	notFoundAtInfo := func(status int) slog.Level {
+		if status == http.StatusNotFound {
+			return slog.LevelInfo
+		}
+		return StatusLevel(status)
+	}
+	rec, _ := serveChain(t, NewLoggerMiddleware(LoggerConfig{Level: notFoundAtInfo}), func(c *core.Context) error {
+		return errs.NewErrorNotFound("course not found")
+	})
+
+	if rec.rec.Level != slog.LevelInfo {
+		t.Fatalf("custom Level must be used: got %v, want INFO", rec.rec.Level)
+	}
+	if rec.rec.Message != "Error while processing request" {
+		t.Errorf("Level must change only the level; message: got %q", rec.rec.Message)
+	}
+	if msg, ok := rec.attr("message"); !ok || msg.String() != "course not found" {
+		t.Errorf("Level must change only the level; message attr: got %q ok=%v", msg.String(), ok)
+	}
+}
+
+func TestDisabledLevelBuildsNoAttrs(t *testing.T) {
+	r := core.NewResources()
+	r.SetConfig(config.NewConfigDefaults())
+	r.SetLogHandler(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	m := &LoggerMiddleware{}
+	m.Init(r)
+
+	ctx := core.NewContext(core.NewCore(r), httptest.NewRequest(http.MethodGet, "/assets/app.js", nil), httptest.NewRecorder())
+	ctx.Status(http.StatusOK)
+	start := time.Now()
+
+	if allocs := testing.AllocsPerRun(100, func() { m.logRequest(ctx, start, nil) }); allocs != 0 {
+		t.Fatalf("a request line below the log level must not build its attrs: got %v allocs per request, want 0", allocs)
+	}
+}
+
 func BenchmarkLogRequestSuccess(b *testing.B) {
 	r := core.NewResources()
 	r.SetConfig(config.NewConfigDefaults())
@@ -188,6 +336,25 @@ func BenchmarkLogRequestSuccess(b *testing.B) {
 	m.Init(r)
 
 	req := httptest.NewRequest(http.MethodGet, "/things/42", nil)
+	ctx := core.NewContext(core.NewCore(r), req, httptest.NewRecorder())
+	next := func(c *core.Context) error { return c.Status(http.StatusOK) }
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.Handle(ctx, next)
+	}
+}
+
+func BenchmarkLogRequestDisabled(b *testing.B) {
+	r := core.NewResources()
+	r.SetConfig(config.NewConfigDefaults())
+	r.SetLogHandler(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	m := &LoggerMiddleware{}
+	m.Init(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
 	ctx := core.NewContext(core.NewCore(r), req, httptest.NewRecorder())
 	next := func(c *core.Context) error { return c.Status(http.StatusOK) }
 

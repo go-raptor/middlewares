@@ -28,7 +28,25 @@ func Middlewares() raptor.Middlewares {
 
 ## logger
 
-Writes one line per request with the client IP, method, path, status and duration. A successful request is logged at info level with its handler. When the handler returns an error, the line is logged at error level with the error's message.
+Writes one line per request with the client IP, method, path, status and duration. The level follows the response status: a 5xx is logged at error, a 4xx at warn and anything else at info. The message says whether the handler returned an error: `Request processed` lines carry the handler, `Error while processing request` lines the error's message. Raptor renders a returned error before the logger runs, so the logged status is the one the client got, including the 500 for an error that isn't an `errs.Error`.
+
+Change the level with `LoggerConfig.Level`, for example to keep scanners' 404s at info, and leave the other statuses to `logger.StatusLevel`:
+
+```go
+raptor.Use(logger.NewLoggerMiddleware(logger.LoggerConfig{
+	Level: func(status int) slog.Level {
+		if status == http.StatusNotFound {
+			return slog.LevelInfo
+		}
+		return logger.StatusLevel(status)
+	},
+}))
+```
+
+A line below `general.log_level` is dropped before its attributes are built, so it costs next to nothing. That gives two ways to quiet successful requests, such as every static asset an SPA controller serves:
+
+- A `Level` that returns `slog.LevelDebug` below 400. With `log_level: info` this drops every successful request, API calls included, and keeps every 4xx and 5xx.
+- `raptor.UseExcept(&logger.LoggerMiddleware{}, "SPA.Index")` in place of `raptor.Use`. This drops every SPA line, its 404s and errors included.
 
 The attrs of an `errs.Error` often carry request data: a validation issue list holds the submitted values, passwords included. So by default only their keys are logged, as `attr_keys=[email password]`. Choose what gets logged with `LoggerConfig.ErrorAttrs`:
 
