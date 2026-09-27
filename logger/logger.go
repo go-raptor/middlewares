@@ -64,13 +64,15 @@ func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, 
 		return
 	}
 
-	attrs := []slog.Attr{
+	// Room for handler, or message and attr_keys, keeps the slice on the
+	// stack; a full literal would regrow on the heap at the next append.
+	attrs := append(make([]slog.Attr, 0, 8),
 		slog.String("ip", ctx.RealIP()),
 		slog.String("method", ctx.Request().Method),
 		slog.String("path", ctx.Request().URL.Path),
 		slog.Int("status", status),
 		slog.String("duration", formatDuration(time.Since(startTime))),
-	}
+	)
 
 	if err == nil {
 		attrs = append(attrs, slog.String("handler", core.ActionDescriptor(ctx.Controller(), ctx.Action())))

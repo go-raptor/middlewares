@@ -15,6 +15,7 @@ Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 ### Performance
 
 - A request line below the configured log level returns before building its attributes: about 45 ns and no allocations, down from about 280 ns and 3 allocations.
+- A logged line's attributes stay on the stack instead of regrowing on the heap: 64 B in 3 allocations per line, down from 480 B in 4, and about 12% faster.
 
 ## cors — v1.1.0 (2026-09-26)
 

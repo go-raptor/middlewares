@@ -46,6 +46,15 @@ func (h *capturingHandler) Handle(ctx context.Context, r slog.Record) error {
 func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
 
+// nopHandler takes every line and keeps none, so an allocation count is the
+// logger's and slog's own, not a handler's.
+type nopHandler struct{}
+
+func (nopHandler) Enabled(context.Context, slog.Level) bool  { return true }
+func (nopHandler) Handle(context.Context, slog.Record) error { return nil }
+func (h nopHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
+func (h nopHandler) WithGroup(string) slog.Handler           { return h }
+
 func run(t *testing.T, req *http.Request, next func(*core.Context) error) captured {
 	t.Helper()
 	return runWith(t, &LoggerMiddleware{}, req, next)
@@ -324,6 +333,28 @@ func TestDisabledLevelBuildsNoAttrs(t *testing.T) {
 
 	if allocs := testing.AllocsPerRun(100, func() { m.logRequest(ctx, start, nil) }); allocs != 0 {
 		t.Fatalf("a request line below the log level must not build its attrs: got %v allocs per request, want 0", allocs)
+	}
+}
+
+func TestLoggedLineAttrsDoNotRegrow(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector adds allocations inside slog")
+	}
+	r := core.NewResources()
+	r.SetConfig(config.NewConfigDefaults())
+	r.SetLogHandler(nopHandler{})
+
+	m := &LoggerMiddleware{}
+	m.Init(r)
+
+	ctx := core.NewContext(core.NewCore(r), httptest.NewRequest(http.MethodGet, "/things/42", nil), httptest.NewRecorder())
+	ctx.Status(http.StatusOK)
+
+	// The 3 left are slog's Record spilling past its 5 inline attrs, the
+	// handler descriptor and the formatted duration. A fixed ~5ms keeps the
+	// duration's digits under 100, which strconv formats without allocating.
+	if allocs := testing.AllocsPerRun(100, func() { m.logRequest(ctx, time.Now().Add(-5*time.Millisecond), nil) }); allocs > 3 {
+		t.Fatalf("a logged line's attrs must not regrow on the heap: got %v allocs per request, want at most 3", allocs)
 	}
 }
 
