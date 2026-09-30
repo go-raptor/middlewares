@@ -432,3 +432,67 @@ func TestPanickingHandlerStillLogged(t *testing.T) {
 		t.Errorf("the client must still get Raptor's 500, got %d", rec.Code)
 	}
 }
+
+func TestRequestLineCarriesRequestID(t *testing.T) {
+	c := run(t, httptest.NewRequest(http.MethodGet, "/things", nil), func(ctx *core.Context) error {
+		ctx.Set("request_id", "req-9")
+		return ctx.Status(http.StatusOK)
+	})
+	if v, ok := c.attr("request_id"); !ok || v.String() != "req-9" {
+		t.Fatalf("request_id = %v (%v), want req-9", v, ok)
+	}
+
+	c = run(t, httptest.NewRequest(http.MethodGet, "/things", nil), func(ctx *core.Context) error {
+		return ctx.Status(http.StatusOK)
+	})
+	if _, ok := c.attr("request_id"); ok {
+		t.Fatal("without the requestid middleware there is no request_id attr")
+	}
+}
+
+func TestPanicLineCarriesRequestID(t *testing.T) {
+	cap := &capturingHandler{}
+	r := core.NewResources()
+	r.SetConfig(config.NewConfigDefaults())
+	r.SetLogHandler(cap)
+
+	c := core.NewCore(r)
+	c.RegisterHandler("TestController", "Show", func(ctx *core.Context) error {
+		ctx.Set("request_id", "req-7")
+		panic("boom")
+	})
+	if err := c.RegisterMiddlewares(&core.Components{Middlewares: core.Middlewares{core.Use(&LoggerMiddleware{})}}); err != nil {
+		t.Fatal(err)
+	}
+	c.Serve(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/things/1", nil), c.Handlers["TestController"]["Show"], "TestController", "Show", "/things/{id}", nil)
+
+	for _, rc := range cap.records {
+		if rc.rec.Message == "Handler panicked" {
+			if v, ok := rc.attr("request_id"); !ok || v.String() != "req-7" {
+				t.Fatalf("request_id = %v (%v), want req-7", v, ok)
+			}
+			return
+		}
+	}
+	t.Fatal("no Handler panicked line")
+}
+
+func TestLoggedLineWithRequestIDDoesNotRegrow(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector adds allocations inside slog")
+	}
+	r := core.NewResources()
+	r.SetConfig(config.NewConfigDefaults())
+	r.SetLogHandler(nopHandler{})
+
+	m := &LoggerMiddleware{}
+	m.Init(r)
+
+	ctx := core.NewContext(core.NewCore(r), httptest.NewRequest(http.MethodGet, "/things/42", nil), httptest.NewRecorder())
+	ctx.Set("request_id", "0123456789abcdef0123456789abcdef")
+	ctx.Status(http.StatusOK)
+
+	if allocs := testing.AllocsPerRun(100, func() { m.logRequest(ctx, time.Now().Add(-5*time.Millisecond), nil) }); allocs > 3 {
+		t.Fatalf("a logged line with request_id must not regrow on the heap: got %v allocs per request, want at most 3", allocs)
+	}
+}

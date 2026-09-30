@@ -70,14 +70,28 @@ func (m *LoggerMiddleware) logPanic(ctx *raptor.Context, startTime time.Time) {
 	if !m.Log.Enabled(reqCtx, level) {
 		return
 	}
-	m.Log.LogAttrs(reqCtx, level, "Handler panicked",
+	attrs := []slog.Attr{
 		slog.String("ip", ctx.RealIP()),
 		slog.String("method", ctx.Request().Method),
 		slog.String("path", ctx.Request().URL.Path),
 		slog.Int("status", status),
 		slog.String("duration", formatDuration(time.Since(startTime))),
 		slog.String("handler", core.ActionDescriptor(ctx.Controller(), ctx.Action())),
-	)
+	}
+	m.Log.LogAttrs(reqCtx, level, "Handler panicked", appendRequestID(attrs, ctx)...)
+}
+
+// requestIDKey is where the requestid middleware stores the request's ID
+// with ctx.Set.
+const requestIDKey = "request_id"
+
+// appendRequestID adds the request_id attr when the requestid middleware
+// has set one, so a request's lines correlate with Raptor's own.
+func appendRequestID(attrs []slog.Attr, ctx *raptor.Context) []slog.Attr {
+	if id, ok := ctx.Get(requestIDKey).(string); ok && id != "" {
+		attrs = append(attrs, slog.String(requestIDKey, id))
+	}
+	return attrs
 }
 
 func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, err error) {
@@ -96,15 +110,17 @@ func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, 
 		return
 	}
 
-	// Room for handler, or message and attr_keys, keeps the slice on the
-	// stack; a full literal would regrow on the heap at the next append.
-	attrs := append(make([]slog.Attr, 0, 8),
+	// Room for request_id, and handler or message and attr_keys, keeps the
+	// slice on the stack; a full literal would regrow on the heap at the
+	// next append.
+	attrs := append(make([]slog.Attr, 0, 9),
 		slog.String("ip", ctx.RealIP()),
 		slog.String("method", ctx.Request().Method),
 		slog.String("path", ctx.Request().URL.Path),
 		slog.Int("status", status),
 		slog.String("duration", formatDuration(time.Since(startTime))),
 	)
+	attrs = appendRequestID(attrs, ctx)
 
 	if err == nil {
 		attrs = append(attrs, slog.String("handler", core.ActionDescriptor(ctx.Controller(), ctx.Action())))
