@@ -1,11 +1,13 @@
 package limiter
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-raptor/raptor/v4/config"
@@ -76,5 +78,23 @@ func TestDefaultsApplied(t *testing.T) {
 	}
 	if m.config.Burst != int(DefaultRateLimiterConfig.Rate) {
 		t.Errorf("Burst should default to the rate, got %d", m.config.Burst)
+	}
+}
+
+// The logger middleware already writes a warn line for every 429; a second
+// one from the limiter doubles log volume exactly when an attack floods it.
+func TestRejectionLoggedAtDebugOnly(t *testing.T) {
+	var buf bytes.Buffer
+	r := testResources()
+	r.SetLogHandler(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	m := NewRateLimiterMiddleware(RateLimiterConfig{Rate: 1, Burst: 1})
+	m.Init(r)
+
+	handle(t, m)
+	if _, err := handle(t, m); err == nil {
+		t.Fatal("the second request must be rejected")
+	}
+	if strings.Contains(buf.String(), "Rate limit exceeded") {
+		t.Fatalf("a rejection must not be logged above debug: %s", buf.String())
 	}
 }

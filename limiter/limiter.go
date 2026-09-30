@@ -80,7 +80,8 @@ func (m *RateLimiterMiddleware) Handle(c *core.Context, next func(*core.Context)
 	}
 
 	if !allow {
-		m.Log.Warn("Rate limit exceeded", "ip", ip)
+		// Debug, not warn: the logger middleware records every 429 already.
+		m.Log.Debug("Rate limit exceeded", "ip", ip)
 		c.Response().Header().Set(core.HeaderRetryAfter, strconv.Itoa(m.retryAfterSeconds))
 		return errs.NewErrorTooManyRequests("Rate limit exceeded")
 	}
