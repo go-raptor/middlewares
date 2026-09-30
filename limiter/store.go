@@ -83,7 +83,7 @@ func (store *RateLimiterMemoryStore) Allow(identifier string) (bool, error) {
 	}
 	visitor.lastSeen = now
 
-	return visitor.Limiter.AllowN(now, 1), nil
+	return visitor.AllowN(now, 1), nil
 }
 
 func (store *RateLimiterMemoryStore) shardFor(key string) *shard {
@@ -101,19 +101,29 @@ func (store *RateLimiterMemoryStore) cleanup(sh *shard, now time.Time) {
 	sh.lastCleanup = now
 }
 
-// evictOldest removes the least-recently-seen visitor to keep the shard within
-// its cap. It only runs when a shard is already full, so its O(n) scan is a
-// backstop under a distinct-key flood, not a hot path. The caller holds sh.mutex.
+// evictionSample is how many visitors evictOldest looks at. Map iteration
+// starts at a random position, so the oldest of a small sample approximates
+// the least recently seen visitor at a fixed cost. A full scan would let a
+// flood of new clients (cheap with IPv6 /64s) buy an O(n) pass under the
+// shard lock with every request.
+const evictionSample = 8
+
+// evictOldest removes the least recently seen of a sample of visitors to
+// keep the shard within its cap. The caller holds sh.mutex.
 func (store *RateLimiterMemoryStore) evictOldest(sh *shard) {
 	var oldestKey string
 	var oldestSeen time.Time
-	first := true
+	seen := 0
 	for id, visitor := range sh.visitors {
-		if first || visitor.lastSeen.Before(oldestSeen) {
-			oldestKey, oldestSeen, first = id, visitor.lastSeen, false
+		if seen == 0 || visitor.lastSeen.Before(oldestSeen) {
+			oldestKey, oldestSeen = id, visitor.lastSeen
+		}
+		seen++
+		if seen == evictionSample {
+			break
 		}
 	}
-	if !first {
+	if seen > 0 {
 		delete(sh.visitors, oldestKey)
 	}
 }

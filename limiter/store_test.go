@@ -1,7 +1,9 @@
 package limiter
 
 import (
+	"encoding/binary"
 	"fmt"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -142,4 +144,57 @@ func TestConcurrentAllowIsRaceFree(t *testing.T) {
 		}(g)
 	}
 	wg.Wait()
+}
+
+// BenchmarkAllowDistinctKeyFlood is a flood of never-seen clients against a
+// full store: every Allow has to evict to stay within MaxVisitors.
+func BenchmarkAllowDistinctKeyFlood(b *testing.B) {
+	store := newRateLimiterMemoryStore(RateLimiterConfig{Rate: 20, Burst: 20, ExpiresIn: time.Hour, MaxVisitors: DefaultRateLimiterConfig.MaxVisitors})
+	var ip [4]byte
+	key := func(i int) string {
+		binary.BigEndian.PutUint32(ip[:], uint32(i))
+		return netip.AddrFrom4(ip).String()
+	}
+	for i := range 2 * DefaultRateLimiterConfig.MaxVisitors {
+		store.Allow(key(i))
+	}
+	i := 1 << 30
+	b.ReportAllocs()
+	for b.Loop() {
+		i++
+		store.Allow(key(i))
+	}
+}
+
+// With a shard no larger than the eviction sample, eviction is exact: the
+// least recently seen visitor goes, and a refreshed one stays.
+func TestEvictionDropsLeastRecentlySeen(t *testing.T) {
+	store := newRateLimiterMemoryStore(RateLimiterConfig{Rate: 1, Burst: 1, ExpiresIn: time.Hour, MaxVisitors: 2 * numShards})
+	now := time.Unix(1_700_000_000, 0)
+	store.timeNow = func() time.Time { return now }
+
+	var same []string
+	for i := 1; len(same) < 3; i++ {
+		ip := netip.AddrFrom4([4]byte{10, 0, byte(i >> 8), byte(i)}).String()
+		if len(same) == 0 || store.shardFor(canonicalKey(ip)) == store.shardFor(canonicalKey(same[0])) {
+			same = append(same, ip)
+		}
+	}
+	a, b, c := same[0], same[1], same[2]
+	sh := store.shardFor(canonicalKey(a))
+
+	store.Allow(a)
+	now = now.Add(time.Second)
+	store.Allow(b)
+	now = now.Add(time.Second)
+	store.Allow(a) // a is now the most recently seen
+	now = now.Add(time.Second)
+	store.Allow(c) // shard full: the least recently seen, b, must go
+
+	if _, ok := sh.visitors[canonicalKey(b)]; ok {
+		t.Fatal("eviction kept the least recently seen visitor")
+	}
+	if _, ok := sh.visitors[canonicalKey(a)]; !ok {
+		t.Fatal("eviction dropped a visitor seen more recently than another")
+	}
 }
