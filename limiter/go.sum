@@ -1,8 +1,8 @@
 github.com/go-raptor/connectors v1.1.0 h1:U6Fjhv68q7gIoFEAIKZGd5TtKygmZI8tG5TJt6IS/gg=
 github.com/go-raptor/connectors v1.1.0/go.mod h1:A7T++oNId2F9SB5i9IQcm+3QzruL5s1nFLfRk1eA0SU=
-github.com/go-raptor/raptor/v4 v4.3.1 h1:9hD1v91KrSwhDo/e9zHEEjq6Wa8RCaCttEC00frLzwI=
-github.com/go-raptor/raptor/v4 v4.3.1/go.mod h1:llA2fmqRtCOJ60AgzdmSJUwm4UhHVfdLIrm/e/H/oD0=
+github.com/go-raptor/raptor/v4 v4.5.0 h1:UifuFr1++ZaxSNkAgR7v5iLEpEn+bpaAn4DeJ29aZXk=
+github.com/go-raptor/raptor/v4 v4.5.0/go.mod h1:QBCZFYuM0SHuBfoaAmAbbnF6uLUHPTJA8gvnGl/7Jp0=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
-golang.org/x/time v0.15.0 h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U=
-golang.org/x/time v0.15.0/go.mod h1:Y4YMaQmXwGQZoFaVFk4YpCt4FLQMYKZe9oeV/f4MSno=
+golang.org/x/time v0.16.0 h1:vMb6ptszcQMkcwiRTAuNNU50gom6++Q/6gY2hDM6VDE=
+golang.org/x/time v0.16.0/go.mod h1:rVKOqvZeKvrDKTQiAHJ7wmwP0RzleSphoEA9RcdLA0s=
