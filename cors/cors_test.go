@@ -259,6 +259,7 @@ func TestOriginPatternsMatchWholeLabelsAndPorts(t *testing.T) {
 	for origin, want := range map[string]bool{
 		"https://app.example.com":          true,
 		"https://a.b.example.com":          true,
+		"https://my_app.example.com":       true,
 		"http://localhost:5173":            true,
 		"http://[::1]:3000":                true,
 		"https://example.com":              false,

@@ -194,9 +194,10 @@ func (m *CORSMiddleware) matchOrigin(origin string) string {
 	return ""
 }
 
-// hostLabels matches one or more whole DNS labels, each followed by a dot:
-// the "*." of a host pattern.
-const hostLabels = `(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+`
+// hostLabels matches one or more whole host labels, each followed by a dot:
+// the "*." of a host pattern. Underscores are allowed because browsers
+// send them (my_app.example.com); no dot, colon or slash can slip in.
+const hostLabels = `(?:[a-z0-9_-]+\.)+`
 
 // compileOriginPattern turns an origin with wildcards into a regexp. A "*"
 // may stand only for whole leftmost host labels (https://*.example.com) or
