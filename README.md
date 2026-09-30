@@ -10,11 +10,15 @@ Middlewares for the [Raptor](https://github.com/go-raptor/raptor) web framework.
 | [`cors`](#cors) | CORS headers and preflight handling | `go get github.com/go-raptor/middlewares/cors` |
 | [`csrf`](#csrf) | Rejects cross-origin writes using `http.CrossOriginProtection` | `go get github.com/go-raptor/middlewares/csrf` |
 | [`limiter`](#limiter) | Token-bucket rate limiting per client IP | `go get github.com/go-raptor/middlewares/limiter` |
+| [`requestid`](#requestid) | An ID per request, in the response, the logs and the request context | `go get github.com/go-raptor/middlewares/requestid` |
+| [`secure`](#secure) | Browser security headers on every response | `go get github.com/go-raptor/middlewares/secure` |
 
 ```go
 func Middlewares() raptor.Middlewares {
 	return raptor.Middlewares{
+		raptor.Use(&requestid.RequestIDMiddleware{}),
 		raptor.Use(&logger.LoggerMiddleware{}),
+		raptor.Use(&secure.SecureMiddleware{}),
 		raptor.Use(&cors.CORSMiddleware{}),
 		raptor.Use(&csrf.CSRFMiddleware{}),
 		raptor.Use(limiter.NewRateLimiterMiddleware(limiter.RateLimiterConfig{})),
@@ -59,6 +63,8 @@ raptor.Use(logger.NewLoggerMiddleware(logger.LoggerConfig{
 ```
 
 `logger.ErrorAttrValues` logs every value verbatim, the behavior before v1.1.0. Use it only when no attr ever holds request data.
+
+With the [requestid](#requestid) middleware registered, every line also carries `request_id` (v1.4.0+), as do Raptor's own error and panic lines (raptor v4.6.0+).
 
 ## cors
 
@@ -122,3 +128,21 @@ raptor.UseOnly(limiter.NewRateLimiterMiddleware(limiter.RateLimiterConfig{
 Rejected requests get `429` with a `Retry-After` header. Rejections are logged at debug; the logger middleware already writes a warn line for each 429.
 
 In tests, every request comes from httptest's `192.0.2.1`, so a suite that logs in through the real endpoint more than five times trips the login limiter. Give each test client its own address with `raptor.WithRemoteAddr` (raptor/v4 v4.4.0+).
+
+## requestid
+
+Gives every request an ID. A valid incoming `X-Request-Id` (1 to 128 characters of `[A-Za-z0-9._-]`, as nginx or a load balancer sends) is reused, so logs correlate across hops; anything else is replaced by 128 random bits in hex. The ID goes into the `X-Request-Id` response header, `ctx.Get(requestid.Key)`, and the request context, where a service reads it with `requestid.FromContext(ctx)`. Register it first, so every other middleware's lines carry it.
+
+## secure
+
+Sets browser security headers on every response, errors included:
+
+| Header | Default |
+| --- | --- |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `X-Frame-Options` | `DENY` |
+| `Content-Security-Policy` | `frame-ancestors 'none'` |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+
+HSTS is opt-in, because it pins browsers to HTTPS for as long as its max-age says. Turn it on in production config with `secure_hsts_max_age: "31536000"`, or in code with `SecureConfig{HSTSMaxAge: 31536000, HSTSIncludeSubdomains: true}`. `SecureConfig.Headers` replaces a default by name, or omits it with `""`. The headers are set before the handler runs, so a handler can still set its own, such as a page's full `Content-Security-Policy`.

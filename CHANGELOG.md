@@ -2,6 +2,24 @@
 
 Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
+## secure — Unreleased
+
+### Added
+
+- New module: sets `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `Cross-Origin-Opener-Policy: same-origin` on every response, errors included. HSTS is opt-in (`SecureConfig.HSTSMaxAge` or app config `secure_hsts_max_age`). `SecureConfig.Headers` replaces or omits any header.
+
+## requestid — Unreleased
+
+### Added
+
+- New module: reuses a valid incoming `X-Request-Id` or generates one, echoes it in the response, and stores it under `requestid.Key` (`ctx.Get`) and in the request context (`requestid.FromContext`).
+
+## logger — Unreleased
+
+### Added
+
+- Request lines and `Handler panicked` lines carry `request_id` when the requestid middleware has set one.
+
 ## cors — v1.2.0 (2026-09-30)
 
 ### Upgrading
