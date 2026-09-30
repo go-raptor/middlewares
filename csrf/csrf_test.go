@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-raptor/raptor/v4/config"
 	"github.com/go-raptor/raptor/v4/core"
@@ -157,5 +158,33 @@ func TestRejectionLogsDiagnostics(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the rejection log must carry %q to diagnose proxy setups: %s", want, out)
 		}
+	}
+}
+
+func TestRejectionLogIsSampled(t *testing.T) {
+	var buf bytes.Buffer
+	r := testResources(nil)
+	r.SetLogHandler(slog.NewTextHandler(&buf, nil))
+	m := NewCSRFMiddleware(CSRFConfig{})
+	m.Init(r)
+	if err := m.Setup(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	m.now = func() time.Time { return now }
+
+	for range 5 {
+		if rec, _ := serve(m, http.MethodPost, "/things", crossSite); rec.Code != http.StatusForbidden {
+			t.Fatalf("sampling the log must not let requests through: got %d", rec.Code)
+		}
+	}
+	if n := strings.Count(buf.String(), "Rejected cross-origin request"); n != 1 {
+		t.Fatalf("5 rejections within one interval logged %d lines, want 1", n)
+	}
+
+	now = now.Add(rejectionLogInterval)
+	serve(m, http.MethodPost, "/things", crossSite)
+	if n := strings.Count(buf.String(), "Rejected cross-origin request"); n != 2 || !strings.Contains(buf.String(), "suppressed=4") {
+		t.Fatalf("the next interval's line must report the 4 suppressed rejections: %s", buf.String())
 	}
 }

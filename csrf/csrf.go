@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-raptor/raptor/v4"
 	"github.com/go-raptor/raptor/v4/errs"
@@ -25,11 +27,22 @@ type CSRFConfig struct {
 	BypassPatterns []string `yaml:"bypass_patterns"`
 }
 
+// rejectionLogInterval spaces the diagnostic lines for rejected requests.
+// The first rejection is logged at once and later ones at most once per
+// interval, with a count of those skipped, so a flood of forged requests
+// can't flood the log. The logger middleware still records each 403.
+const rejectionLogInterval = 10 * time.Second
+
 type CSRFMiddleware struct {
 	raptor.Middleware
 
 	config     CSRFConfig
 	protection *http.CrossOriginProtection
+
+	logMu      sync.Mutex
+	nextLog    time.Time
+	suppressed int
+	now        func() time.Time
 }
 
 func NewCSRFMiddleware(config CSRFConfig) *CSRFMiddleware {
@@ -37,6 +50,9 @@ func NewCSRFMiddleware(config CSRFConfig) *CSRFMiddleware {
 }
 
 func (m *CSRFMiddleware) Setup() error {
+	if m.now == nil {
+		m.now = time.Now
+	}
 	m.protection = http.NewCrossOriginProtection()
 
 	origins := m.config.TrustedOrigins
@@ -62,13 +78,30 @@ func (m *CSRFMiddleware) Handle(ctx *raptor.Context, next func(*raptor.Context) 
 	if err := m.protection.Check(req); err != nil {
 		// Origin, Sec-Fetch-Site and Host are what tell a real cross-site
 		// request apart from a proxy that rewrites Host.
-		m.Log.Warn("Rejected cross-origin request",
-			"ip", ctx.RealIP(), "method", req.Method, "path", req.URL.Path,
-			"origin", req.Header.Get("Origin"), "sec_fetch_site", req.Header.Get("Sec-Fetch-Site"),
-			"host", req.Host, "reason", err)
+		if suppressed, ok := m.logRejection(); ok {
+			m.Log.Warn("Rejected cross-origin request",
+				"ip", ctx.RealIP(), "method", req.Method, "path", req.URL.Path,
+				"origin", req.Header.Get("Origin"), "sec_fetch_site", req.Header.Get("Sec-Fetch-Site"),
+				"host", req.Host, "reason", err, "suppressed", suppressed)
+		}
 		return errs.NewErrorForbidden("Cross-origin request rejected")
 	}
 	return next(ctx)
+}
+
+// logRejection reports whether this rejection gets a diagnostic line, and
+// how many rejections went unlogged since the previous one.
+func (m *CSRFMiddleware) logRejection() (suppressed int, ok bool) {
+	m.logMu.Lock()
+	defer m.logMu.Unlock()
+	now := m.now()
+	if now.Before(m.nextLog) {
+		m.suppressed++
+		return 0, false
+	}
+	suppressed, m.suppressed = m.suppressed, 0
+	m.nextLog = now.Add(rejectionLogInterval)
+	return suppressed, true
 }
 
 // splitList reads a comma-separated config value, trimming spaces and
