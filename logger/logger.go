@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"net/http"
 	"slices"
 	"strconv"
 	"time"
@@ -43,9 +44,40 @@ func (m *LoggerMiddleware) Setup() error {
 
 func (m *LoggerMiddleware) Handle(c *raptor.Context, next func(*raptor.Context) error) error {
 	startTime := time.Now()
+	returned := false
+	defer func() {
+		if !returned {
+			m.logPanic(c, startTime)
+		}
+	}()
 	err := next(c)
+	returned = true
 	m.logRequest(c, startTime, err)
 	return err
+}
+
+// logPanic records a request whose handler panicked, while the panic
+// unwinds to Raptor, which answers 500 unless the response was already
+// committed. It doesn't recover, so the panic and its stack reach Raptor's
+// own log line unchanged.
+func (m *LoggerMiddleware) logPanic(ctx *raptor.Context, startTime time.Time) {
+	status := http.StatusInternalServerError
+	if ctx.Response().Committed {
+		status = ctx.Response().Status
+	}
+	level := m.level(status)
+	reqCtx := ctx.Request().Context()
+	if !m.Log.Enabled(reqCtx, level) {
+		return
+	}
+	m.Log.LogAttrs(reqCtx, level, "Handler panicked",
+		slog.String("ip", ctx.RealIP()),
+		slog.String("method", ctx.Request().Method),
+		slog.String("path", ctx.Request().URL.Path),
+		slog.Int("status", status),
+		slog.String("duration", formatDuration(time.Since(startTime))),
+		slog.String("handler", core.ActionDescriptor(ctx.Controller(), ctx.Action())),
+	)
 }
 
 func (m *LoggerMiddleware) logRequest(ctx *raptor.Context, startTime time.Time, err error) {

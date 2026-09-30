@@ -395,3 +395,40 @@ func BenchmarkLogRequestDisabled(b *testing.B) {
 		_ = m.Handle(ctx, next)
 	}
 }
+
+func TestPanickingHandlerStillLogged(t *testing.T) {
+	cap := &capturingHandler{}
+	r := core.NewResources()
+	r.SetConfig(config.NewConfigDefaults())
+	r.SetLogHandler(cap)
+
+	c := core.NewCore(r)
+	c.RegisterHandler("TestController", "Show", func(*core.Context) error { panic("boom") })
+	if err := c.RegisterMiddlewares(&core.Components{Middlewares: core.Middlewares{core.Use(&LoggerMiddleware{})}}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	c.Serve(rec, httptest.NewRequest(http.MethodGet, "/things/1", nil), c.Handlers["TestController"]["Show"], "TestController", "Show", "/things/{id}", nil)
+
+	var lines []captured
+	for _, rc := range cap.records {
+		if rc.rec.Message == "Handler panicked" {
+			lines = append(lines, rc)
+		}
+	}
+	if len(lines) != 1 {
+		t.Fatalf("a panicking handler must get exactly one access line, got %d", len(lines))
+	}
+	if v, _ := lines[0].attr("status"); v.Int64() != http.StatusInternalServerError {
+		t.Errorf("status = %v, want 500", v)
+	}
+	if v, _ := lines[0].attr("path"); v.String() != "/things/1" {
+		t.Errorf("path = %v", v)
+	}
+	if lines[0].rec.Level != slog.LevelError {
+		t.Errorf("level = %v, want error", lines[0].rec.Level)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("the client must still get Raptor's 500, got %d", rec.Code)
+	}
+}
