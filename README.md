@@ -131,11 +131,11 @@ In tests, every request comes from httptest's `192.0.2.1`, so a suite that logs 
 
 ## requestid
 
-Gives every request an ID. A valid incoming `X-Request-Id` (1 to 128 characters of `[A-Za-z0-9._-]`, as nginx or a load balancer sends) is reused, so logs correlate across hops; anything else is replaced by 128 random bits in hex. The ID goes into the `X-Request-Id` response header, `ctx.Get(requestid.Key)`, and the request context, where a service reads it with `requestid.FromContext(ctx)`. Register it first, so every other middleware's lines carry it.
+Gives every request an ID. A valid incoming `X-Request-Id` (1 to 128 characters of `[A-Za-z0-9._-]`, as nginx or a load balancer sends) is reused, so logs correlate across hops; anything else is replaced by 128 random bits in hex. The ID goes into the `X-Request-Id` response header, `ctx.Get(requestid.Key)`, and the request context, where a service reads it with `requestid.FromContext(ctx)`. Register it first, so the logger's lines and Raptor's own error and panic lines carry it for every request. The csrf and limiter diagnostic lines don't include it.
 
 ## secure
 
-Sets browser security headers on every response, errors included:
+Sets browser security headers on every response that passes through the middleware chain, errors included. Register it early, right after requestid and logger, so responses from middlewares that answer early get them too. ServeMux's own path-cleaning redirects never reach middleware, so they carry none.
 
 | Header | Default |
 | --- | --- |
@@ -146,3 +146,7 @@ Sets browser security headers on every response, errors included:
 | `Cross-Origin-Opener-Policy` | `same-origin` |
 
 HSTS is opt-in, because it pins browsers to HTTPS for as long as its max-age says. Turn it on in production config with `secure_hsts_max_age: "31536000"`, or in code with `SecureConfig{HSTSMaxAge: 31536000, HSTSIncludeSubdomains: true}`. `SecureConfig.Headers` replaces a default by name, or omits it with `""`. The headers are set before the handler runs, so a handler can still set its own, such as a page's full `Content-Security-Policy`.
+
+Two defaults can get in the way:
+- **Framing.** `frame-ancestors 'none'` also stops your own pages from framing each other. Allow same-origin framing with `Headers: map[string]string{"Content-Security-Policy": "frame-ancestors 'self'", "X-Frame-Options": "SAMEORIGIN"}`.
+- **Popups.** `Cross-Origin-Opener-Policy: same-origin` cuts the link to popups on other origins, such as OAuth or payment windows that report back through `window.opener`. Use `"same-origin-allow-popups"`, or `""` to omit the header.
