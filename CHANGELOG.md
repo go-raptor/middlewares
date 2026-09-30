@@ -2,7 +2,7 @@
 
 Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
-## cors — Unreleased
+## cors — v1.2.0 (2026-09-30)
 
 ### Upgrading
 
@@ -21,7 +21,7 @@ Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
 - Requires raptor/v4 v4.5.0 and Go 1.27.
 
-## csrf — Unreleased
+## csrf — v1.1.0 (2026-09-30)
 
 ### Changed
 
@@ -32,7 +32,7 @@ Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
 - README: `ctx.Bind` enforces JSON bodies since raptor v4.5.0.
 
-## limiter — Unreleased
+## limiter — v1.1.0 (2026-09-30)
 
 ### Security
 
@@ -43,7 +43,7 @@ Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 - Rejections are logged at debug; the logger middleware already writes a warn line for each 429.
 - Requires raptor/v4 v4.5.0, Go 1.27 and golang.org/x/time v0.16.0.
 
-## logger — Unreleased
+## logger — v1.3.0 (2026-09-30)
 
 ### Fixed
 
