@@ -6,7 +6,7 @@ Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
 ### Upgrading
 
-- Origin patterns are strict: `*` may stand only for whole leftmost host labels (`https://*.example.com`) or the whole port (`http://localhost:*`). Any other `*`, a `?` wildcard, and the origin `null` fail `Setup`.
+- Origin patterns are strict: `*` may stand only for whole leftmost host labels (`https://*.example.com`) or the whole port (`http://localhost:*`). Any other `*`, a `?` wildcard, and the origin `null` fail `Setup`. For other shapes, such as `https://myapp-*.vercel.app`, decide in code with `CORSConfig.AllowOriginFunc`.
 
 ### Security
 
@@ -47,7 +47,7 @@ Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
 ### Fixed
 
-- A request whose handler panicked is logged (`Handler panicked`, status 500, error level) instead of leaving no access line. The panic still reaches Raptor unchanged.
+- A request whose handler panicked is logged as `Handler panicked` instead of leaving no access line. The line carries the status the client gets, 500 unless the response was already committed, at the level that status maps to. The panic still reaches Raptor unchanged, and Raptor logs it with its stack.
 
 ### Changed
 
