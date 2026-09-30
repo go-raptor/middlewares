@@ -2,6 +2,57 @@
 
 Each middleware is its own module, versioned by its own tag (`logger/vX.Y.Z`).
 
+## cors — Unreleased
+
+### Upgrading
+
+- Origin patterns are strict: `*` may stand only for whole leftmost host labels (`https://*.example.com`) or the whole port (`http://localhost:*`). Any other `*`, a `?` wildcard, and the origin `null` fail `Setup`.
+
+### Security
+
+- `*` matched any characters, so `https://*example.com` also allowed `https://attackerexample.com`, and `http://localhost:*` allowed non-numeric ports.
+- The origin `null`, sent by sandboxed iframes and `file:` pages, could be allowed, and so reflected with credentials.
+
+### Fixed
+
+- Only an `OPTIONS` request with `Origin` and `Access-Control-Request-Method` is answered as a preflight. Every other `OPTIONS` reaches the app, so its own `OPTIONS` routes run and unknown paths get 404/405 instead of an empty 204.
+
+### Changed
+
+- Requires raptor/v4 v4.5.0 and Go 1.27.
+
+## csrf — Unreleased
+
+### Changed
+
+- The diagnostic line for a rejected request is written for the first rejection and then at most once every 10 seconds, with `suppressed` counting the rejections in between. Every request is still rejected, and the logger middleware still records each 403.
+- Requires raptor/v4 v4.5.0 and Go 1.27.
+
+### Docs
+
+- README: `ctx.Bind` enforces JSON bodies since raptor v4.5.0.
+
+## limiter — Unreleased
+
+### Security
+
+- Once the store was full, every new client made eviction scan its whole shard under the shard lock: about 70 µs per request under a flood of distinct clients, cheap to produce with IPv6 /64s. Eviction now samples eight visitors: about 0.9 µs.
+
+### Changed
+
+- Rejections are logged at debug; the logger middleware already writes a warn line for each 429.
+- Requires raptor/v4 v4.5.0, Go 1.27 and golang.org/x/time v0.16.0.
+
+## logger — Unreleased
+
+### Fixed
+
+- A request whose handler panicked is logged (`Handler panicked`, status 500, error level) instead of leaving no access line. The panic still reaches Raptor unchanged.
+
+### Changed
+
+- Requires raptor/v4 v4.5.0 and Go 1.27.
+
 ## logger — v1.2.0 (2026-09-27)
 
 ### Changed

@@ -70,14 +70,14 @@ app:
   cors_allow_credentials: "true"
 ```
 
-A value set in `CORSConfig` takes precedence over the config value: config only fills what code leaves unset, so `cors_allow_credentials` can turn credentials on but never turn off `AllowCredentials: true`. It must be exactly `"true"`. If a listed frontend also sends writes and you use [csrf](#csrf), list it in `csrf_trusted_origins` too, or its POST, PUT and DELETE requests get a 403. Patterns such as `https://*.example.com` are supported. `"*"` combined with credentials is refused at startup, because it would let any site make credentialed requests and read the responses.
+A value set in `CORSConfig` takes precedence over the config value: config only fills what code leaves unset, so `cors_allow_credentials` can turn credentials on but never turn off `AllowCredentials: true`. It must be exactly `"true"`. If a listed frontend also sends writes and you use [csrf](#csrf), list it in `csrf_trusted_origins` too, or its POST, PUT and DELETE requests get a 403. A `*` may stand for whole leftmost labels (`https://*.example.com`, which matches `app.example.com` and `a.b.example.com` but not `example.com`) or the whole port (`http://localhost:*`). Other wildcards, and the origin `null`, fail at startup. Only an `OPTIONS` request carrying `Origin` and `Access-Control-Request-Method` is answered as a preflight; any other `OPTIONS` reaches your routes. `"*"` combined with credentials is refused at startup, because it would let any site make credentialed requests and read the responses.
 
 ## csrf
 
 A cookie-authenticated API needs CSRF protection. Three defenses combine:
 
 1. **`SameSite=Lax` cookies.** The browser doesn't attach the cookie to cross-site POST, PUT or DELETE requests. It does attach it to top-level cross-site GET navigations, so GET must never change state.
-2. **JSON-only request bodies.** A forged HTML form can't send `application/json`. This only holds if the app rejects writes whose `Content-Type` isn't JSON: Raptor's `ctx.Bind` doesn't check it, so a form posting `text/plain` with a JSON-shaped body would bind. Multipart uploads give this defense up.
+2. **JSON-only request bodies.** A forged HTML form can't send `application/json`. Raptor's `ctx.Bind` enforces this since v4.5.0: a body that isn't declared `application/json` gets `415`. Multipart uploads give this defense up.
 3. **This middleware.** It wraps Go's `http.CrossOriginProtection`, which rejects cross-origin unsafe requests based on `Sec-Fetch-Site`, falling back to comparing `Origin` with `Host`. It covers every endpoint, uploads included, and needs no tokens.
 
 Register it globally with `raptor.Use(&csrf.CSRFMiddleware{})`. GET, HEAD and OPTIONS always pass. A rejected request gets `403 {"code":403,"message":"Cross-origin request rejected"}`.
@@ -95,7 +95,7 @@ In code, `csrf.NewCSRFMiddleware(csrf.CSRFConfig{TrustedOrigins: ..., BypassPatt
 
 Deployment details:
 
-- **Production.** Serve HTTPS, or preserve the `Host` header at the reverse proxy (`proxy_set_header Host $host;`). Browsers send `Sec-Fetch-Site` only to HTTPS origins and localhost. Without it the check compares `Origin` with `Host`, so a proxy that rewrites `Host` rejects every write. Each rejection is logged at warn level with the request's `origin`, `sec_fetch_site` and `host`, which shows which case you're in.
+- **Production.** Serve HTTPS, or preserve the `Host` header at the reverse proxy (`proxy_set_header Host $host;`). Browsers send `Sec-Fetch-Site` only to HTTPS origins and localhost. Without it the check compares `Origin` with `Host`, so a proxy that rewrites `Host` rejects every write. The first rejection, and after that at most one every 10 seconds, is logged at warn level with the request's `origin`, `sec_fetch_site` and `host`, which shows which case you're in; `suppressed` counts the rejections in between. The logger middleware still records every 403.
 - **Vite dev proxy.** Proxy the API with the object form and without `changeOrigin`, so `Host` is preserved:
 
   ```ts
@@ -119,6 +119,6 @@ raptor.UseOnly(limiter.NewRateLimiterMiddleware(limiter.RateLimiterConfig{
 }), "Auth.Login"),
 ```
 
-Rejected requests get `429` with a `Retry-After` header.
+Rejected requests get `429` with a `Retry-After` header. Rejections are logged at debug; the logger middleware already writes a warn line for each 429.
 
 In tests, every request comes from httptest's `192.0.2.1`, so a suite that logs in through the real endpoint more than five times trips the login limiter. Give each test client its own address with `raptor.WithRemoteAddr` (raptor/v4 v4.4.0+).
