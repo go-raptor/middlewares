@@ -75,15 +75,16 @@ func (m *CORSMiddleware) Setup() error {
 		if origin == "*" {
 			continue
 		}
+		if origin == "null" {
+			return fmt.Errorf(`cors: origin "null" comes from sandboxed iframes and local files and can't be trusted; remove it`)
+		}
 		if !strings.ContainsAny(origin, "*?") {
 			m.exactOrigins[origin] = struct{}{}
 			continue
 		}
-		pattern := "^" + strings.ReplaceAll(strings.ReplaceAll(regexp.QuoteMeta(origin), "\\*", ".*"), "\\?", ".") + "$"
-		re, err := regexp.Compile(pattern)
+		re, err := compileOriginPattern(origin)
 		if err != nil {
-			m.Log.Warn("Invalid origin pattern, skipping", "origin", origin, "error", err)
-			continue
+			return fmt.Errorf("cors: %w", err)
 		}
 		m.wildcardPatterns = append(m.wildcardPatterns, re)
 	}
@@ -191,6 +192,53 @@ func (m *CORSMiddleware) matchOrigin(origin string) string {
 	}
 
 	return ""
+}
+
+// hostLabels matches one or more whole DNS labels, each followed by a dot:
+// the "*." of a host pattern.
+const hostLabels = `(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+`
+
+// compileOriginPattern turns an origin with wildcards into a regexp. A "*"
+// may stand only for whole leftmost host labels (https://*.example.com) or
+// for the whole port (http://localhost:*). A free-form "*" would let
+// https://*example.com match https://attackerexample.com.
+func compileOriginPattern(pattern string) (*regexp.Regexp, error) {
+	invalid := func(why string) error {
+		return fmt.Errorf("origin pattern %q: %s", pattern, why)
+	}
+	if strings.Contains(pattern, "?") {
+		return nil, invalid(`"?" wildcards are not supported`)
+	}
+	scheme, hostPort, ok := strings.Cut(pattern, "://")
+	if !ok || scheme == "" || strings.Contains(scheme, "*") {
+		return nil, invalid("want scheme://host[:port]")
+	}
+	host, port, hasPort := hostPort, "", false
+	if i := strings.LastIndexByte(hostPort, ':'); i >= 0 && !strings.Contains(hostPort[i:], "]") {
+		host, port, hasPort = hostPort[:i], hostPort[i+1:], true
+	}
+
+	var b strings.Builder
+	b.WriteString("^" + regexp.QuoteMeta(scheme) + "://")
+	if rest, ok := strings.CutPrefix(host, "*."); ok && rest != "" && !strings.Contains(rest, "*") {
+		b.WriteString(hostLabels + regexp.QuoteMeta(rest))
+	} else if strings.Contains(host, "*") {
+		return nil, invalid(`"*" must stand for whole leftmost labels, as in https://*.example.com`)
+	} else {
+		b.WriteString(regexp.QuoteMeta(host))
+	}
+	if hasPort {
+		switch {
+		case port == "*":
+			b.WriteString(`:[0-9]+`)
+		case strings.Contains(port, "*"):
+			return nil, invalid(`"*" in a port must be the whole port, as in http://localhost:*`)
+		default:
+			b.WriteString(":" + regexp.QuoteMeta(port))
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
 }
 
 // splitList reads a comma-separated config value, trimming spaces and

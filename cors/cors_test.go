@@ -252,3 +252,35 @@ func TestOptionsWithoutPreflightHeadersReachesHandler(t *testing.T) {
 		t.Fatalf("it is still a cross-origin request and gets Access-Control-Allow-Origin, got %q", got)
 	}
 }
+
+func TestOriginPatternsMatchWholeLabelsAndPorts(t *testing.T) {
+	m := newMiddleware(t, CORSConfig{AllowOrigins: []string{"https://*.example.com", "http://localhost:*", "http://[::1]:*"}})
+
+	for origin, want := range map[string]bool{
+		"https://app.example.com":          true,
+		"https://a.b.example.com":          true,
+		"http://localhost:5173":            true,
+		"http://[::1]:3000":                true,
+		"https://example.com":              false,
+		"https://attackerexample.com":      false,
+		"https://app.example.com.evil.com": false,
+		"https://app.example.com:8443":     false,
+		"http://localhost":                 false,
+		"http://localhost:abc":             false,
+		"http://localhost.evil.com:80":     false,
+	} {
+		if got := m.matchOrigin(origin) != ""; got != want {
+			t.Errorf("%s: allowed=%v, want %v", origin, got, want)
+		}
+	}
+}
+
+func TestSetupRejectsLoosePatternsAndNull(t *testing.T) {
+	for _, origin := range []string{"https://*example.com", "https://ex*.com", "https://app.*.com", "https://*.", "https://?.example.com", "http://localhost:30*", "*://example.com", "null"} {
+		m := NewCORSMiddleware(CORSConfig{AllowOrigins: []string{origin}})
+		m.Init(testResources())
+		if err := m.Setup(); err == nil {
+			t.Errorf("%q must fail Setup", origin)
+		}
+	}
+}
