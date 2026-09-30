@@ -112,14 +112,14 @@ func (m *CORSMiddleware) Handle(c *core.Context, next func(*core.Context) error)
 	req := c.Request()
 	res := c.Response()
 	origin := req.Header.Get(core.HeaderOrigin)
-	preflight := req.Method == "OPTIONS"
+	// Only an OPTIONS request with Origin and Access-Control-Request-Method
+	// is a preflight; any other OPTIONS is the app's.
+	preflight := req.Method == http.MethodOptions && origin != "" &&
+		req.Header.Get(core.HeaderAccessControlRequestMethod) != ""
 
 	addVary(res.Header(), core.HeaderOrigin)
 
 	if origin == "" {
-		if preflight {
-			return c.NoContent()
-		}
 		return next(c)
 	}
 

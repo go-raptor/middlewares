@@ -234,3 +234,21 @@ func TestAppConfigEnablesCredentials(t *testing.T) {
 		t.Fatalf("cors_allow_credentials \"true\" did not enable credentials: got %q", got)
 	}
 }
+
+// A preflight is an OPTIONS request with Origin and
+// Access-Control-Request-Method. Any other OPTIONS belongs to the app, whose
+// own OPTIONS routes, 404 and 405 must still answer it.
+func TestOptionsWithoutPreflightHeadersReachesHandler(t *testing.T) {
+	m := newMiddleware(t, CORSConfig{AllowOrigins: []string{"https://app.example"}})
+
+	if _, next := handle(t, m, http.MethodOptions, "", nil); !next {
+		t.Fatal("OPTIONS without Origin is not a preflight and must reach the app")
+	}
+	rec, next := handle(t, m, http.MethodOptions, "https://app.example", nil)
+	if !next {
+		t.Fatal("OPTIONS without Access-Control-Request-Method is not a preflight and must reach the app")
+	}
+	if got := rec.Header().Get(core.HeaderAccessControlAllowOrigin); got != "https://app.example" {
+		t.Fatalf("it is still a cross-origin request and gets Access-Control-Allow-Origin, got %q", got)
+	}
+}
